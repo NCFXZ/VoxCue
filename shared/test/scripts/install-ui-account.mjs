@@ -224,6 +224,12 @@ export async function enterPrimaryUiAccount(app, login) {
   await login.getByRole('button', { name: '登录', exact: true }).click();
   return waitForRestoredMainWindow(app);
 }
+export async function showInterviewWindow(page, click = button => button.click()) {
+  await click(page.getByRole('button', { name: '关闭截图保护', exact: true }));
+  await click(page.getByRole('button', { name: '确认显示面试窗口', exact: true }));
+  await page.getByRole('button', { name: '开启截图保护', exact: true, pressed: false }).waitFor();
+}
+
 export async function connectUiAccount(app, login, service = 'chatgpt') {
   await login.waitForLoadState('domcontentloaded');
   const main = login.url().endsWith('#login') ? await enterPrimaryUiAccount(app, login) : login;
@@ -236,10 +242,10 @@ export async function connectUiAccount(app, login, service = 'chatgpt') {
   const row = settings.locator('.ai-service-row').filter({
     hasText: service === 'copilot' ? 'GitHub Copilot' : 'ChatGPT',
   });
-  const connected = row.getByRole('button', { name: '断开连接', exact: true });
+  const connected = row.getByRole('button', { name: '禁用', exact: true });
   await row.waitFor();
   if (!(await connected.isVisible()))
-    await row.getByRole('button', { name: '连接', exact: true }).click();
+    await row.getByRole('button', { name: /^(登录|启用)$/ }).click();
   await connected.waitFor();
   await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
   return main;

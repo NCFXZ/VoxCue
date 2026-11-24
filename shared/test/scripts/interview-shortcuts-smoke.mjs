@@ -65,6 +65,10 @@ const app = await electron.launch({
   },
 });
 const errors = [];
+let nativeErrors = '';
+app.process().stderr?.on('data', chunk => {
+  nativeErrors = (nativeErrors + String(chunk)).slice(-16000);
+});
 let configuration;
 let phone;
 const invoke = (key) =>
@@ -1322,14 +1326,17 @@ try {
     const win = BrowserWindow.getAllWindows().find((win) =>
       win.webContents.getURL().endsWith('#interview'),
     );
-    win.webContents.emit(
+    const contents = win.webContents;
+    contents.emit(
       'did-fail-load',
       {},
       -2,
       'Synthetic failed page load',
-      win.webContents.getURL(),
+      contents.getURL(),
       true,
     );
+    // Loading may complete after the failure handler has destroyed its window.
+    contents.emit('did-finish-load');
   });
   await failedClosed;
   await waitKeysReleased();
@@ -1348,6 +1355,8 @@ try {
     'PASS: isolated remote/transcription configurable shortcuts, hidden microphone toggle, microphone draft/1000ms answer, disabled system settings, default screen-bottom-left help, matching toggles, native fade/reversal/reduced motion, panel preferences, opacity/language, renderer revisions and owned-window cleanup. No hardware or real credentials.',
   );
 } catch (error) {
+  console.error('Interview shortcuts failed before teardown:', error);
+  if (nativeErrors) console.error('Interview shortcuts native errors:', nativeErrors);
   console.error(
     'Synthetic window errors:',
     await app.evaluate(() => globalThis.shortcutUi.windowErrors).catch(() => []),

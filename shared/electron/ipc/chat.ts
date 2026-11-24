@@ -11,6 +11,8 @@ import {
 import { mergeActivityLog } from '../contracts/activity';
 import { handleDesktop, sendDesktop } from './handle';
 import type { Telemetry } from '../backend/telemetry/service';
+import type { AccountService } from '../contracts/auth';
+import type { AccountUsage } from '../contracts/accountUsage';
 
 interface Dependencies {
   chat: AIChatService;
@@ -18,6 +20,7 @@ interface Dependencies {
   isDemo(): boolean;
   openLink(url: string): Promise<void>;
   telemetry?: Pick<Telemetry, 'activity' | 'answer'>;
+  accountUsage?(service: AccountService): Promise<AccountUsage | null>;
 }
 // IPC owns sender checks and the lifetime of each native chat request. Business
 // orchestration has no Electron dependency and can be tested independently.
@@ -64,9 +67,15 @@ export function registerChatIpc(dependencies: Dependencies) {
   });
   handleDesktop('chat:account-usage', async (event, ...args) => {
     requireMain(event);
-    if (args.length) throw Error('Invalid request');
+    const [service] = args;
+    if (args.length > 1 || (service !== undefined && service !== 'chatgpt' && service !== 'copilot'))
+      throw Error('Invalid request');
     if (dependencies.isDemo()) return { ok: true, usage: null };
     try {
+      if (service !== undefined) {
+        if (!dependencies.accountUsage) throw Error('请先登录模型服务后调用真实模型。');
+        return { ok: true, usage: await dependencies.accountUsage(service) };
+      }
       return { ok: true, usage: (await chat.accountUsage?.()) ?? null };
     } catch (error) {
       return { ok: false, error: publicFailure(error) };
@@ -104,10 +113,11 @@ export function registerChatIpc(dependencies: Dependencies) {
     const active = { sender: event.sender, controller };
     activeChats.set(validated.id, active);
     const current = () => activeChats.get(validated.id) === active && !event.sender.isDestroyed();
+    let discardPartial = false;
     const events = batchChatEvents(
       (value) => sendDesktop(event.sender, 'chat:event', value),
       controller.signal,
-      current,
+      () => !discardPartial && current(),
     );
     const partial: ChatPartialResponse = {};
     let metric: ReturnType<Telemetry['answer']> | undefined;
@@ -121,7 +131,7 @@ export function registerChatIpc(dependencies: Dependencies) {
           if (value.id === validated.id && !controller.signal.aborted && current()) {
             if (value.type === 'delta' && value.text.trim()) metric?.first();
             if (value.type === 'delta')
-              partial.answerText = ((partial.answerText ?? '') + value.text).slice(0, 1000000);
+              partial.answerText = ((value.replace ? '' : partial.answerText ?? '') + value.text).slice(0, 1000000);
             if (value.type === 'reasoning-summary')
               partial.reasoningSummary = value.text.slice(0, 100000);
             if (value.type === 'profile-preview') partial.profilePreview = value.preview;
@@ -146,10 +156,12 @@ export function registerChatIpc(dependencies: Dependencies) {
       return { ok: true, ...result };
     } catch (error) {
       metric?.finish(controller.signal.aborted ? 'cancelled' : 'failure');
+      const failure = publicFailure(error);
+      discardPartial = failure.discardPartial === true;
       return {
         ok: false,
-        error: publicFailure(error),
-        ...(Object.keys(partial).length ? { partial } : {}),
+        error: failure,
+        ...(!discardPartial && Object.keys(partial).length ? { partial } : {}),
       };
     } finally {
       try {

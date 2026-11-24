@@ -480,15 +480,24 @@ export class CopilotChatService implements AIChatService {
       if (callbackError) throw callbackError;
       if (!finalText.trim()) throw new CopilotError('GitHub Copilot 未返回完整回答，请重试。');
       previews?.flush();
-      const proposal = profile && request.profile ? profile.finish(request.profile) : undefined;
+      // Proposal validation messages are application-authored; never report them as connection failures.
+      const validated = <T>(check: () => T) => {
+        try {
+          return check();
+        } catch (error) {
+          throw error instanceof Error && !(error instanceof ChatServiceError) ? new CopilotError(error.message) : error;
+        }
+      };
+      const stream = profile;
+      const proposal = stream && request.profile ? validated(() => stream.finish(request.profile!)) : undefined;
       await Promise.all(usageWrites);
-      const skillSourceIssues = verifySkillProposal(
+      const skillSourceIssues = validated(() => verifySkillProposal(
         request,
         proposal?.changes,
         sourceMap,
         completedSearch,
         proposal?.skillScope,
-      );
+      ));
       if (proposal?.delta) publish({ id: request.id, type: 'delta', text: proposal.delta });
       if (lastPhase) activity({ kind: 'status', phase: lastPhase, status: 'completed' });
       return {

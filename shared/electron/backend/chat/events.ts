@@ -32,7 +32,9 @@ export function batchChatEvents(
       if (event.type !== 'delta') {
         flush();
         send(event);
-      } else if (first) {
+      } else if (first || event.replace) {
+        // A replacement starts a new draft, so queued text from the old draft is obsolete.
+        discard();
         first = false;
         send(event);
       } else {

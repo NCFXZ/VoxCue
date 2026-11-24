@@ -1,15 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   apiProviderIds,
   apiProviders,
   isApiProvider,
-  qwenRegions,
-  qwenRegionRoutes,
-  qwenRequiresWorkspace,
   type ApiBalance,
   type ApiConnectionConfig,
   type ApiProvider,
-  type QwenRegion,
 } from '../../electron/contracts/apiConnections';
 import type { AppUsage } from '../../electron/contracts/chat';
 import { t, uiLocale } from '../i18n';
@@ -18,12 +14,12 @@ import { userError } from '../services/errors';
 import { useAuth } from '../stores/auth';
 import { useChatConnection } from '../stores/chatConnection';
 import { Button } from './ui/button';
-import { ChoiceMenu } from './ui/choice-menu';
 import { ConfirmDeleteButton } from './ui/confirm-delete-button';
 import { ArrowUpRight, Edit, Play, Plus, Refresh, Square } from './icons';
 import { ProviderIcon } from './ProviderIcon';
 import { ApiKeyDialog } from './ApiKeyDialog';
 import { InterviewReveal } from './InterviewReveal';
+import { useHeightTransition } from './ui/useHeightTransition';
 
 const localMetrics = [
   ['requests', '本机请求'],
@@ -31,13 +27,22 @@ const localMetrics = [
   ['outputTokens', '输出 token'],
 ] as const;
 
-export function ApiUsageValues({ balance, local }: { balance?: string; local?: AppUsage | string }) {
+export function ApiUsageValues({ balance, local }: { balance?: string | ApiBalance[]; local?: AppUsage | string }) {
   return (
     <dl className="api-usage-values">
       {balance !== undefined && (
         <div className="api-usage-line">
           <dt>{t('账户余额')}</dt>
-          <dd>{balance}</dd>
+          <dd>
+            {typeof balance === 'string' ? balance : [...balance]
+              .sort((a, b) => {
+                const rank = (currency: string) => currency === 'CNY' ? 0 : currency === 'USD' ? 1 : 2;
+                return rank(a.currency) - rank(b.currency);
+              })
+              .map(({ currency, total }, index) => (
+                <span className="api-balance-value" key={`${currency}-${index}`}>{total} {currency}</span>
+              ))}
+          </dd>
         </div>
       )}
       {local !== undefined && localMetrics.map(([field, label]) => (
@@ -59,6 +64,9 @@ function ApiUsage({ connection, active }: { connection: ApiConnectionConfig; act
   const [usageError, setUsageError] = useState('');
   const [busy, setBusy] = useState(true);
   const balance = apiProviders[provider].balance;
+  const usageCard = useRef<HTMLElement>(null);
+  useHeightTransition(`${busy}:${balances?.length ?? 0}:${!!usage}:${balanceError}:${usageError}:${active}`,
+    () => balance ? [usageCard.current] : []);
   useEffect(() => {
     let current = true;
     setBusy(true);
@@ -100,11 +108,11 @@ function ApiUsage({ connection, active }: { connection: ApiConnectionConfig; act
   }, [connection, provider, active, balance, refresh]);
   if (!active && !balance) return null;
   const balanceValue = balances?.length
-    ? balances.map((item) => item.total + ' ' + item.currency).join(' · ')
+    ? balances
     : t(busy && !balances && !balanceError ? '读取中…' : '暂不可用');
   const localValue = usage ?? t(busy && !usageError ? '读取中…' : '暂不可用');
   return (
-    <section className="api-usage account-quota" aria-label={t('API 用量')} aria-busy={busy}>
+    <section ref={usageCard} className="api-usage account-quota" aria-label={t('API 用量')} aria-busy={busy}>
       <header>
         <strong>{t('API 用量')}</strong>
         <Button
@@ -146,23 +154,10 @@ export function ApiProviderSettings({
 }) {
   const auth = useAuth();
   const active = auth.session?.mode === provider;
-  const [draft, setDraft] = useState<Pick<ApiConnectionConfig, 'region' | 'workspace'>>();
-  const routing = (expanded && draft) || saved;
-  const region = routing?.region ?? 'beijing';
-  const workspace = routing?.workspace ?? '';
-  const unsavedRouting = !!saved && (
-    (provider === 'qwen' && region !== (saved.region ?? 'beijing')) ||
-    workspace.trim() !== (saved.workspace ?? '')
-  );
-  useEffect(() => {
-    if (!expanded) setDraft(undefined);
-  }, [expanded]);
   const [promptConfig, setPromptConfig] = useState<ApiConnectionConfig>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const locked = !known || busy || auth.waiting || auth.loading;
-  const needsWorkspace = provider === 'qwen' && qwenRequiresWorkspace(region);
-  const hasOptions = provider === 'qwen' || provider === 'anthropic';
   const name = t(apiProviders[provider].name);
   async function run(operation: () => Promise<void | boolean>) {
     if (locked) return false;
@@ -177,19 +172,12 @@ export function ApiProviderSettings({
       setBusy(false);
     }
   }
-  const configure = () => {
-    setPromptConfig({
-      provider,
-      ...(provider === 'qwen' && { region }),
-      ...(workspace.trim() && { workspace: workspace.trim() }),
-    });
-  };
+  const configure = () => setPromptConfig({ provider });
   const remove = async () => {
-    if (active && !(await auth.signOut())) return false;
+    if (active && !(await auth.disable())) return false;
     await apiConnections.remove(provider);
     onExpand(false);
     onChange();
-    setDraft(undefined);
   };
   return (
     <div className="api-service" role="group" aria-label={name}>
@@ -212,11 +200,11 @@ export function ApiProviderSettings({
         <div className="ai-service-actions">
           <Button
             variant="outline"
-            disabled={locked || !saved || (!active && unsavedRouting)}
+            disabled={locked || !saved}
             onClick={() =>
               void run(async () => {
                 if (active) {
-                  if (await auth.signOut()) onExpand(false);
+                  if (await auth.disable()) onExpand(false);
                 } else {
                   await auth.connect(provider);
                   if (useAuth.getState().session?.mode === provider) onExpand(true);
@@ -242,7 +230,7 @@ export function ApiProviderSettings({
           ) : (
             <Button
               variant="outline"
-              disabled={locked || (needsWorkspace && !workspace.trim())}
+              disabled={locked}
               onClick={configure}
             >
               <Plus size={16} />
@@ -263,7 +251,7 @@ export function ApiProviderSettings({
                   <button
                     type="button"
                     className="api-text-action"
-                    disabled={locked || (needsWorkspace && !workspace.trim())}
+                    disabled={locked}
                     onClick={configure}
                   >
                     {saved && <Edit size={13} />}
@@ -293,40 +281,6 @@ export function ApiProviderSettings({
                   </button>
                 </div>
               </div>
-              {hasOptions && (
-                <div className="api-routing-fields">
-                  {provider === 'qwen' && (
-                    <div className="api-routing-field">
-                      <span>{t('服务地域')}</span>
-                      <ChoiceMenu<QwenRegion>
-                        label="服务地域"
-                        className="settings-choice"
-                        sizeToOptions
-                        value={region}
-                        disabled={locked}
-                        options={qwenRegions.map((value) => ({ value, label: t(qwenRegionRoutes[value].name) }))}
-                        onChange={(next) => {
-                          if (next !== region) setDraft({ region: next });
-                        }}
-                      />
-                    </div>
-                  )}
-                  <label className="api-routing-field">
-                    <span>{t(needsWorkspace ? '工作区 ID' : '工作区 ID（可选）')}</span>
-                    <span className="api-routing-control field-label">
-                      <input
-                        value={workspace}
-                        disabled={locked}
-                        maxLength={63}
-                        autoComplete="off"
-                        spellCheck={false}
-                        required={needsWorkspace}
-                        onChange={(event) => setDraft({ region, workspace: event.currentTarget.value })}
-                      />
-                    </span>
-                  </label>
-                </div>
-              )}
             </div>
           ) : null}
         </InterviewReveal>
@@ -344,7 +298,6 @@ export function ApiProviderSettings({
           replacing={!!saved}
           onFinish={(ok) => {
             setPromptConfig(undefined);
-            if (ok || saved) setDraft(undefined);
             if (!ok) return;
             onChange(promptConfig);
             onExpand(true);

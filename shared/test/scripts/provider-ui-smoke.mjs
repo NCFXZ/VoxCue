@@ -287,7 +287,7 @@ try {
       usage: async () => ({ requests: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0, updatedAt: null }),
     });
   });
-  const method = settings.getByRole('radiogroup', { name: '连接方式', exact: true });
+  const method = settings.getByRole('radiogroup', { name: '登录方式', exact: true });
   const accountMethod = method.getByRole('radio', { name: '账号授权', exact: true });
   const apiMethod = method.getByRole('radio', { name: 'API 密钥', exact: true });
   const apiSettings = settings.getByRole('region', { name: 'API 密钥', exact: true });

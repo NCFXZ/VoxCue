@@ -112,7 +112,7 @@ export function SpeechControls({
           <div className="speech-section-heading">
             <h3>{t('音频设备')}</h3>
           </div>
-          <div className="speech-device-grid">
+          <div className="speech-device-grid" data-settings-target="audio-devices" data-settings-highlight-group>
             {(['system', 'microphone'] as AudioSource[]).map((source) => {
               const microphone = source === 'microphone';
               const transcription = inputMode === 'transcription';
@@ -121,6 +121,7 @@ export function SpeechControls({
                 <div
                   className={`speech-device speech-setting-row ${enabled || (!microphone && transcription) ? '' : 'is-disabled'}`}
                   key={source}
+                  data-settings-target={source}
                 >
                   <div className="speech-device-heading speech-setting-label">
                     <strong>{microphone ? t('麦克风') : t('系统音频')}</strong>

@@ -77,6 +77,8 @@ export interface ChatFailure {
   status?: number;
   requestId?: string;
   param?: string;
+  /** A terminal provider review withheld the previously streamed answer. */
+  discardPartial?: boolean;
 }
 export interface ChatFile {
   name: string;
@@ -108,7 +110,7 @@ export type ChatEvent =
   | { id: string; type: 'provider'; provider: ModelProvider }
   | { id: string; type: 'interview-retry'; attempt: number; limit: number }
   | { id: string; type: 'profile-preview'; preview: ProfilePreview; generation?: ProfileGeneration }
-  | { id: string; type: 'delta'; text: string }
+  | { id: string; type: 'delta'; text: string; /** Replace a previous failed attempt's visible draft. */ replace?: true }
   | { id: string; type: 'reasoning-summary'; text: string }
   | { id: string; type: 'search' }
   | { id: string; type: 'activity'; activity: ChatActivity }

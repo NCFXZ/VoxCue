@@ -77,7 +77,7 @@ export async function checkFirstStatusPosition(item, startProcessing, receiveCre
   if (receiveCreated) {
     await receiveCreated();
     await item.locator('.progress-state[data-phase="waiting"]').waitFor();
-    samePosition('waiting', await measure('正在思考'));
+    samePosition('waiting', await measure('正在等待模型响应'));
     await checkHiddenDivider(root);
   }
   await startProcessing();

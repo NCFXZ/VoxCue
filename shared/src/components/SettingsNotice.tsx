@@ -1,6 +1,7 @@
 import { createContext, useContext, type ReactNode, type RefCallback } from 'react';
 import { t } from '../i18n';
-import { ArrowUpRight, X } from './icons';
+import { ArrowUpRight } from './icons';
+import { DoNotShowAgainButton } from './NoticeActions';
 import { Button } from './ui/button';
 import { useDropdownSurfaceMotion } from './ui/useDropdownSurfaceMotion';
 import { InterviewReveal } from './InterviewReveal';
@@ -43,15 +44,7 @@ export function SettingsNotice({
         <ArrowUpRight size={14} />
       </Button>
       {onDismiss && (
-        <Button
-          variant="ghost"
-          size="icon"
-          data-reveal-on-hover
-          aria-label={t('不再提醒本地资料迁移')}
-          onClick={onDismiss}
-        >
-          <X size={14} />
-        </Button>
+        <DoNotShowAgainButton ariaLabel={t('不再提醒本地资料迁移')} onClick={onDismiss} />
       )}
     </div>
   );

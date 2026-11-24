@@ -18,11 +18,6 @@
 .reasoning-popup-body {
   overflow: clip;
 }
-.reasoning-source {
-  padding: 3px var(--select-content-inset);
-  color: var(--muted);
-  font-size: var(--type-secondary);
-}
 .reasoning-toggle {
   display: flex;
   justify-content: center;

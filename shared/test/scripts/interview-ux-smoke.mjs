@@ -1334,17 +1334,20 @@ try {
   await capture(floating, '06-audio-recovery');
   await floating.locator('.audio-recovery').getByRole('button', { name: '设置', exact: true }).click();
   const recoverySettings = floating.getByRole('dialog', { name: '面试设置', exact: true });
-  const audioRegion = recoverySettings.locator('.interview-audio-settings');
+  const audioRegion = recoverySettings.locator('.interview-audio-settings > .audio-device-editor');
   await floating.waitForFunction(() =>
     document.activeElement?.closest('[data-settings-target]')?.getAttribute('data-settings-target') === 'system' &&
-    document.activeElement.closest('.interview-audio-settings')?.hasAttribute('data-location-highlight'));
+    document.activeElement.closest('.audio-device-editor')?.hasAttribute('data-location-highlight'));
   await assertSettingsHighlight(audioRegion);
   assert.ok(await audioRegion.evaluate(region => {
-    const remote = region.nextElementSibling;
-    return getComputedStyle(region).borderBlockStartStyle === 'solid' &&
+    const section = region.closest('.interview-audio-settings');
+    const remote = section.nextElementSibling;
+    const heading = section.querySelector(':scope > h3');
+    return getComputedStyle(section).borderBlockStartStyle === 'solid' &&
+      !region.contains(heading) &&
       getComputedStyle(region).borderBlockEndStyle === 'solid' &&
       remote.matches('[data-settings-target="remote-connection"]') &&
-      Math.abs(remote.getBoundingClientRect().top - region.getBoundingClientRect().bottom) < 1 &&
+      Math.abs(remote.getBoundingClientRect().top - section.getBoundingClientRect().bottom) < 1 &&
       getComputedStyle(remote).borderBlockEndStyle === 'solid';
   }), 'Audio and remote recovery sections must meet at the shared divider');
   await recoverySettings.getByRole('button', { name: '关闭对话框', exact: true }).click();

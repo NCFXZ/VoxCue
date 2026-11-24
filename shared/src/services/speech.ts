@@ -142,7 +142,7 @@ export async function interviewAnswer(
   const unsubscribe = desktop.onChatEvent((e) => {
     if (signal.aborted || e.id !== id) return;
     if (e.type === 'delta') {
-      onText(e.text, replaceNextText);
+      onText(e.text, e.replace === true || replaceNextText);
       replaceNextText = false;
     } else if (e.type === 'interview-retry') {
       replaceNextText = true;

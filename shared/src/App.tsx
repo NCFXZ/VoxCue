@@ -14,6 +14,7 @@ import { useCloudAccount } from './stores/cloudAccount';
 import { useAuth } from './stores/auth';
 import { useComponents, useComponentReady } from './stores/components';
 import { useUpdates } from './stores/updates';
+import { useAnnouncements } from './stores/announcements';
 import { LoginPage } from './components/LoginPage';
 import { useChatConnection } from './stores/chatConnection';
 import { watchInterviewModel } from './stores/interviewSettings';
@@ -52,6 +53,9 @@ export function App() {
   }, [isLoginWindow, account.state.localMode]);
   const signedIn =
     !!account.state.user || !!account.state.localMode || auth.session?.mode === 'demo';
+  useEffect(() => {
+    if (!isLoginWindow && signedIn) return useAnnouncements.getState().connect();
+  }, [isLoginWindow, signedIn, account.state.user?.id, account.state.localMode]);
   useEffect(() => {
     // Model integrity checks can read several gigabytes. Start them for the first
     // model-consuming UI; the hidden language window and login form need none.
@@ -298,6 +302,11 @@ export function App() {
                     locateProviders ? openSettings('ai', 'chatgpt', 'copilot') : openSettings('ai')}
                   onSpeechSettings={() => openSettings('interview', 'speech-device', 'speech-model')}
                   onImportSettings={() => openSettings('account', 'account-migration')}
+                  onAnnouncementAction={(target) => {
+                    if (target === 'speech-model') openSettings('interview', 'speech-model');
+                    else if (target === 'audio-devices') openSettings('interview', 'audio-devices');
+                    else openSettings(target);
+                  }}
                 />
               </div>
               {page === 'history' && <HistoryPage />}

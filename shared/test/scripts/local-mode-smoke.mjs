@@ -174,7 +174,7 @@ try {
   assert.equal(await settings.getByRole('button', { name: '导出资料', exact: true }).count(), 1);
   await settings.getByRole('button', { name: 'AI 服务', exact: true }).click();
   await settings.getByRole('heading', { name: 'AI 服务', exact: true }).waitFor();
-  assert.equal(await settings.getByRole('button', { name: '连接', exact: true }).count(), 2);
+  assert.equal(await settings.getByRole('button', { name: '登录', exact: true }).count(), 2);
   await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
   await main.getByRole('textbox', { name: '聊天消息' }).fill('合成草稿，重启后保留');
   await main.getByRole('button', { name: '用户菜单', exact: true }).click();
@@ -340,8 +340,8 @@ try {
   // Local mode can connect an AI provider, without a VoxCue account or demo mode.
   await settings.getByRole('button', { name: 'AI 服务', exact: true }).click();
   const chatgpt = settings.locator('.ai-service-row').filter({ hasText: 'ChatGPT' });
-  await chatgpt.getByRole('button', { name: '连接', exact: true }).click();
-  await chatgpt.getByRole('button', { name: '断开连接', exact: true }).waitFor();
+  await chatgpt.getByRole('button', { name: '登录', exact: true }).click();
+  await chatgpt.getByRole('button', { name: '禁用', exact: true }).waitFor();
   assert.equal((await main.evaluate(() => window.desktop.authSession())).mode, 'chatgpt');
   assert.equal(
     (await main.evaluate(() => window.desktop.cloudAccount({ action: 'status' }))).state.user,

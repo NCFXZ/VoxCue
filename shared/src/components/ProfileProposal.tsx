@@ -62,7 +62,11 @@ export function ProfileProposal({ message }: { message: ChatMessage }) {
   const generating = message.status === 'streaming';
   const complete = message.status === 'completed' && !!message.changes;
   const values = complete ? message.changes : message.profilePreview;
-  if (!values || !Object.keys(values).length) return null;
+  if (!values) return null;
+  if (!Object.keys(values).length)
+    return generating && (message.profileGeneration?.fields.length || message.profileGeneration?.skillIndexes.length) ? (
+      <div className="profile-proposal" role="status">{t('正在生成资料提案…')}</div>
+    ) : null;
   const fields = profileFields.filter((key) => values[key] !== undefined);
   const resolved = !!message.applied || !!message.dismissed;
   const pending = complete && !resolved;

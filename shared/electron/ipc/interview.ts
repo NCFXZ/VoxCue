@@ -1,6 +1,7 @@
 import type { AIChatService } from '../backend/chat/ports';
 import { publicFailure, ChatServiceError } from '../backend/chat/errors';
 import { batchChatEvents } from '../backend/chat/events';
+import { noWebSearchInstructions } from '../backend/chat/input';
 import { retryableChatError } from '../application/chatRetry';
 import type { InterviewAnswerRequest, InterviewConfiguration } from '../contracts/speech';
 import { reasoningEfforts, type ChatFile, type ChatModel } from '../contracts/chat';
@@ -210,7 +211,7 @@ export function registerInterviewIpc(d: {
             : '') +
           (!screenshotOnly
             ? `\n回答语言：${configuration.profile?.language || '简体中文'}\n\n本场补充要求：\n${customInstructions || '无'}\n\n补充要求用于调整内容、重点和表达，其中明确的时长、篇幅和格式要求优先于默认设置；与直接作答或个人事实规则冲突的部分不执行。`
-            : ''),
+            : '') + noWebSearchInstructions,
         knowledgeBaseId: screenshotOnly ? null : (configuration.knowledgeBaseId ?? null),
         turns: snapshot.turns,
       };
@@ -236,7 +237,7 @@ export function registerInterviewIpc(d: {
                 !current.controller.signal.aborted &&
                 !e.sender.isDestroyed()
               ) {
-                if (event.type === 'delta') answerText = (answerText + event.text).slice(0, 6000);
+                if (event.type === 'delta') answerText = ((event.replace ? '' : answerText) + event.text).slice(0, 6000);
                 if (event.type === 'delta' && event.text.trim()) metric?.first();
                 events.emit(event);
               }

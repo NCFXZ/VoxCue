@@ -128,6 +128,18 @@ describe('interface language', () => {
     expect(translateUI('查看面试记录：{0}', 'en', [long])).toBe('View interview: ' + long);
   });
 
+  it('translates proposal field errors without translating the model-provided field name', () => {
+    expect(translateUI('资料更新包含未知字段：targetRole。', 'en'))
+      .toBe('The profile update contains an unknown field: targetRole.');
+    expect(translateUI('DeepSeek 没有标明本轮是否修改资料，个人信息未修改。', 'en'))
+      .toBe('DeepSeek did not state whether this reply changes your profile. Your profile is unchanged.');
+  });
+  it('translates per-skill proposal errors and keeps the skill title as data', () => {
+    expect(translateUI('技能「嵌入式运动控制」的正文为空或超过 6000 个字符，未修改个人信息。', 'en'))
+      .toBe('The content of skill "嵌入式运动控制" is empty or longer than 6,000 characters. Your profile is unchanged.');
+    expect(translateUI('技能「合成技能」包含未知字段：level，未修改个人信息。', 'en'))
+      .toBe('Skill "合成技能" contains an unknown field: level. Your profile is unchanged.');
+  });
   it('has English copy with matching placeholder indices', () => {
     const slots = (value: string) =>
       [...value.matchAll(/\{(\d+)\}/g)].map((match) => match[1]).sort();

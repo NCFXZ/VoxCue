@@ -18,7 +18,7 @@ vi.mock('electron', () => ({
   },
 }));
 import { createAuthStorage } from '../../electron/backend/auth/storage';
-import { createCopilotLoginStorage, createServiceSelection } from '../../electron/backend/copilot/storage';
+import { createAccountServiceStorage, createCopilotLoginStorage, createServiceSelection } from '../../electron/backend/copilot/storage';
 afterEach(async () => {
   if (native.directory) await rm(native.directory, { recursive: true, force: true });
   native.directory = '';
@@ -134,6 +134,64 @@ it.each(['credentials.bin', 'copilot-session.json'])(
 const sessionFor = (mode: 'chatgpt' | 'copilot') => ({
   mode, user: { id: 'synthetic', name: 'Example', email: '' }, expiresAt: null,
 });
+it('retains both saved account services across deactivation and restart, and removes only the signed-out service', async () => {
+  native.directory = await mkdtemp(path.join(os.tmpdir(), 'voxcue-account-services-'));
+  const accounts = createAccountServiceStorage();
+  await Promise.all([
+    accounts.set('chatgpt', true, { name: 'Synthetic ChatGPT', email: 'synthetic@example.test' }),
+    accounts.set('copilot', true, { name: 'synthetic-github', email: '' }),
+  ]);
+  const selection = createServiceSelection();
+  await selection.set('chatgpt', true);
+  await selection.set('chatgpt', false);
+  expect(await accounts.list()).toEqual(['chatgpt', 'copilot']);
+  await accounts.dispose();
+  const restored = createAccountServiceStorage();
+  expect(await restored.list()).toEqual(['chatgpt', 'copilot']);
+  expect(await restored.details()).toEqual([
+    { service: 'chatgpt', name: 'Synthetic ChatGPT', email: 'synthetic@example.test' },
+    { service: 'copilot', name: 'synthetic-github', email: '' },
+  ]);
+  const verify = vi.fn();
+  expect(await createServiceSelection().session('startup', verify)).toBeNull();
+  expect(verify).not.toHaveBeenCalled();
+  await restored.set('copilot', false);
+  expect(await restored.list()).toEqual(['chatgpt']);
+  const stored = await readFile(path.join(native.directory, 'auth-data/account-services.json'), 'utf8');
+  expect(JSON.parse(stored)).toEqual([
+    { service: 'chatgpt', name: 'Synthetic ChatGPT', email: 'synthetic@example.test' },
+  ]);
+  expect(native.decrypt).not.toHaveBeenCalled();
+});
+it('reads legacy service names and only exposes public identity fields from newer metadata', async () => {
+  native.directory = await mkdtemp(path.join(os.tmpdir(), 'voxcue-account-services-'));
+  const directory = path.join(native.directory, 'auth-data');
+  await mkdir(directory);
+  await writeFile(path.join(directory, 'account-services.json'), JSON.stringify([
+    'chatgpt', { service: 'copilot', name: 'synthetic-github', email: '', ignored: 'synthetic-extra-field' },
+  ]));
+  const accounts = createAccountServiceStorage();
+  expect(await accounts.details()).toEqual([
+    { service: 'chatgpt', name: '', email: '' },
+    { service: 'copilot', name: 'synthetic-github', email: '' },
+  ]);
+  expect(native.decrypt).not.toHaveBeenCalled();
+});
+it('rejects unknown account metadata and lets an explicit login repair it without reading credentials', async () => {
+  native.directory = await mkdtemp(path.join(os.tmpdir(), 'voxcue-account-services-'));
+  const directory = path.join(native.directory, 'auth-data');
+  await mkdir(directory);
+  await writeFile(path.join(directory, 'account-services.json'), '["openai"]');
+  const accounts = createAccountServiceStorage();
+  await expect(accounts.list()).rejects.toThrow('登录状态记录无效');
+  await accounts.set('copilot', true);
+  expect(await accounts.list()).toEqual(['copilot']);
+  // A new reader confirms the repaired record rather than trusting in-memory state.
+  expect(await createAccountServiceStorage().list()).toEqual(['copilot']);
+  await accounts.dispose();
+  await expect(accounts.set('chatgpt', true)).rejects.toThrow('账号已变化');
+  expect(native.decrypt).not.toHaveBeenCalled();
+});
 async function selectionFile(previous?: unknown) {
   native.directory = await mkdtemp(path.join(os.tmpdir(), 'voxcue-selection-'));
   const directory = path.join(native.directory, 'auth-data');
@@ -162,6 +220,26 @@ it('fresh and explicitly disconnected installs skip startup; only explicit succe
   expect(await disconnected.session('chatgpt', verify)).toEqual(sessionFor('chatgpt'));
   expect(await createServiceSelection().session('startup', verify)).toEqual(sessionFor('chatgpt'));
 });
+
+it.each(['anthropic', 'gemini', 'kimi', 'glm', 'doubao', 'qwen'])(
+  'starts disconnected for a saved %s selection until a supported login succeeds',
+  async (service) => {
+    const previous = { version: 2, service, connected: true };
+    const file = await selectionFile(previous);
+    const state = createServiceSelection();
+    const verify = vi.fn(async () => sessionFor('copilot'));
+
+    await expect(state.session('startup', verify)).resolves.toBeNull();
+    await expect(state.session(undefined, verify)).resolves.toBeNull();
+    expect(state.connected).toBe(false);
+    expect(verify).not.toHaveBeenCalled();
+    expect(JSON.parse(await readFile(file, 'utf8'))).toEqual(previous);
+
+    await state.set('copilot', true);
+    await expect(createServiceSelection().session('startup', verify)).resolves.toEqual(sessionFor('copilot'));
+    expect(verify).toHaveBeenCalledExactlyOnceWith('copilot');
+  },
+);
 
 it('temporary failure preserves the prior selection, a successful switch ignores late verification', async () => {
   const file = await selectionFile('copilot');

@@ -14,6 +14,32 @@ vi.mock('../../../shared/src/services/chat', async (importOriginal) => ({
 }));
 const base = { name: '旧姓名', role: '旧岗位', jobDescription: '旧 JD', background: '已有背景' };
 
+it('shows replacement text and a growing proposal before recovery completes without saving it', async () => {
+  const pending = Promise.withResolvers<Extract<Awaited<ReturnType<typeof streamChat>>, { ok: true }>>();
+  const started = Promise.withResolvers<void>();
+  vi.mocked(streamChat).mockImplementationOnce((request, emit) => {
+    const { id } = request;
+    emit({ id, type: 'delta', text: '旧草稿' });
+    emit({ id, type: 'delta', text: '新回答', replace: true });
+    emit({ id, type: 'delta', text: '正在改写' });
+    emit({ id, type: 'profile-preview', preview: { background: '新摘要片段' },
+      generation: { fields: ['background'], skillIndexes: [] } });
+    started.resolve();
+    return pending.promise;
+  });
+  const sending = usePreparation.getState().send('请缩短简历摘要');
+  await started.promise;
+  const reply = usePreparation.getState().messages.at(-1)!;
+  expect(reply).toMatchObject({ content: '新回答正在改写', status: 'streaming', profilePreview: { background: '新摘要片段' } });
+  expect(reply.changes).toBeUndefined();
+  expect(usePreparation.getState().updateInfo({ background: '新摘要片段' }, reply.id)).toBe(false);
+  expect(usePreparation.getState().info).toEqual(base);
+  pending.resolve({ ok: true, answerText: '新回答正在改写', profileChanges: { background: '新摘要完整内容' }, usage: null, sources: [] });
+  await sending;
+  expect(usePreparation.getState().messages.at(-1)).toMatchObject({ status: 'completed', changes: { background: '新摘要完整内容' } });
+  expect(usePreparation.getState().info).toEqual(base);
+});
+
 it('失败结果补齐先于IPC事件返回的正文和只读预览，不成为可保存提案', async () => {
   vi.mocked(streamChat).mockRejectedValueOnce(
     new ChatRequestError(
@@ -36,6 +62,38 @@ it('失败结果补齐先于IPC事件返回的正文和只读预览，不成为�
   expect(message.changes).toBeUndefined();
   expect(usePreparation.getState().info).toEqual(base);
   expect(usePreparation.getState().updateInfo({}, message.id)).toBe(false);
+});
+it('clears streamed answer, preview and sources when terminal review withholds the response', async () => {
+  const activity = { id: 'search', phase: 'searching', kind: 'web_search', status: 'completed' } as const;
+  const sources = [{ title: '示例来源', url: 'https://example.com/' }];
+  const modelId = 'deepseek-flash';
+  useChatConnection.setState({ models: [{
+    id: modelId, label: 'DeepSeek V4.1 Flash', description: '',
+    provider: { id: 'deepseek', name: 'DeepSeek', dataRecipient: 'DeepSeek' },
+  }] });
+  usePreparation.setState({ modelId });
+  vi.mocked(streamChat).mockImplementationOnce(async (request, emit) => {
+    expect(request).toMatchObject({ modelId, webSearch: true, profile: { name: base.name } });
+    const { id } = request;
+    emit({ id, type: 'activity', activity });
+    emit({ id, type: 'delta', text: '待审核正文' });
+    emit({ id, type: 'reasoning-summary', text: '待审核摘要' });
+    emit({ id, type: 'sources', sources });
+    emit({ id, type: 'profile-preview', preview: { name: '待审核姓名' },
+      generation: { fields: ['name'], skillIndexes: [] } });
+    expect(usePreparation.getState().messages.at(-1)?.content).toBe('待审核正文');
+    throw new ChatRequestError({
+      code: 'content_filter', message: '模型服务拒绝了这次请求。', discardPartial: true,
+    });
+  });
+  await usePreparation.getState().send('更新个人信息');
+  const reply = usePreparation.getState().messages.at(-1)!;
+  expect(reply).toMatchObject({ content: '', status: 'failed', errorCode: 'content_filter', activities: [activity] });
+  expect(reply.reasoningSummary).toBeUndefined();
+  expect(reply.profilePreview).toBeUndefined();
+  expect(reply.profileGeneration).toBeUndefined();
+  expect(reply.sources).toBeUndefined();
+  expect(usePreparation.getState().info).toEqual(base);
 });
 beforeEach(() => {
   useGeneralSettings.setState({ language: 'zh-CN' });
@@ -498,6 +556,104 @@ describe('聊天附件更新需要同意', () => {
 });
 
 describe('资料提案保存与后续聊天', () => {
+  it('新消息保留当前会话全部未处理提案的原资料，并持久化状态而不影响其他会话', async () => {
+    vi.stubGlobal('indexedDB', new IDBFactory());
+    const state = usePreparation.getState;
+    usePreparation.setState({ chatsReady: true });
+    try {
+      await state().send('提出资料修改');
+      const first = state().messages.at(-1)!;
+      const second = { ...first, id: 'pending-clear', changes: { jobDescription: '' } };
+      const applied = { ...first, id: 'already-saved', applied: true };
+      const retained = { ...first, id: 'already-retained', dismissed: true };
+      const otherProposal = { ...first, id: 'other-proposal' };
+      usePreparation.setState({
+        messages: [...state().messages, second, applied, retained],
+        conversations: [...state().conversations, { id: 'other', title: '其他对话', messages: [otherProposal] }],
+      });
+      vi.mocked(streamChat).mockResolvedValueOnce({ ok: true, answerText: '你好', usage: null, sources: [] });
+      await state().send('你好');
+
+      for (const id of [first.id, second.id])
+        expect(state().messages.find(message => message.id === id)).toMatchObject({ dismissed: true });
+      expect(state().messages.find(message => message.id === applied.id)).toBe(applied);
+      expect(state().messages.find(message => message.id === retained.id)).toBe(retained);
+      expect(state().conversations.find(conversation => conversation.id === 'other')?.messages[0]).toBe(otherProposal);
+      expect(state().info).toEqual(base);
+      expect(localStorage.getItem('copilot-personal-info-v1')).toBeUndefined();
+      const request = vi.mocked(streamChat).mock.calls.at(-1)![0];
+      expect(request.turns.filter(turn => turn.role === 'assistant' && turn.content.includes('已拒绝这份提案并保留旧资料')))
+        .toHaveLength(3);
+
+      expect(await state().flushChats()).toBe(true);
+      usePreparation.setState({ chatsReady: false, activeConversation: null, conversations: [], messages: [] });
+      await state().restoreChats();
+      expect(state().messages.find(message => message.id === first.id)?.dismissed).toBe(true);
+      expect(state().messages.find(message => message.id === second.id)?.dismissed).toBe(true);
+      expect(state().conversations.find(conversation => conversation.id === 'other')?.messages[0].dismissed).not.toBe(true);
+      expect(state().updateInfo({}, first.id)).toBe(false);
+      expect(state().info).toEqual(base);
+    } finally {
+      usePreparation.setState({ chatsReady: false });
+    }
+  });
+
+  it('空消息或发送前校验失败不会处理旧提案', async () => {
+    const state = usePreparation.getState;
+    await state().send('提出资料修改');
+    const messages = state().messages;
+    await state().send('  ');
+    usePreparation.setState({ modelId: 'unavailable' });
+    await state().send('你好');
+    expect(streamChat).toHaveBeenCalledTimes(1);
+    expect(state().messages).toBe(messages);
+    expect(state().messages.at(-1)?.dismissed).not.toBe(true);
+    expect(state().info).toEqual(base);
+  });
+
+  it('重试现有回答不作为新消息处理此前提案', async () => {
+    const state = usePreparation.getState;
+    await state().send('提出资料修改');
+    const proposal = state().messages.at(-1)!;
+    usePreparation.setState({ messages: [...state().messages,
+      { id: 'retry-user', role: 'user', content: '普通问题' },
+      { id: 'retry-answer', role: 'assistant', content: '', status: 'failed' },
+    ] });
+    vi.mocked(streamChat).mockResolvedValueOnce({ ok: true, answerText: '重试成功', usage: null, sources: [] });
+    await state().retry('retry-answer');
+    expect(state().messages.find(message => message.id === proposal.id)?.dismissed).not.toBe(true);
+    expect(vi.mocked(streamChat).mock.calls.at(-1)![0].turns.find(turn => turn.role === 'assistant')?.content)
+      .toContain('这份提案尚未保存');
+    expect(state().info).toEqual(base);
+  });
+
+  it('用 API 恢复后的完整提案替换旧预览，清空摘要仍须通过保存确认', async () => {
+    const provider = { id: 'deepseek', name: 'DeepSeek', dataRecipient: 'DeepSeek' };
+    const answerText = '职位描述摘要将清空，请确认后保存。';
+    useChatConnection.setState({
+      models: [{ id: 'deepseek-v4-pro', label: 'deepseek-v4-pro', description: '', provider }],
+    });
+    usePreparation.setState({ modelId: 'deepseek-v4-pro' });
+    vi.mocked(streamChat).mockImplementationOnce(async ({ id }, emit) => {
+      emit({ id, type: 'delta', text: '正在准备提案' });
+      emit({ id, type: 'profile-preview', preview: { jobDescription: '未完成的内容' } });
+      return {
+        ok: true, provider, answerText, sources: [], usage: null,
+        profileChanges: { jobDescription: '' },
+      };
+    });
+    await usePreparation.getState().send('之前保存的岗位说明已经用不上了，请帮我清掉。');
+    const proposal = usePreparation.getState().messages.at(-1)!;
+    expect(proposal).toMatchObject({
+      status: 'completed', content: answerText, changes: { jobDescription: '' },
+    });
+    expect(proposal.profilePreview).toBeUndefined();
+    expect(usePreparation.getState().info).toEqual(base);
+    expect(localStorage.getItem('copilot-personal-info-v1')).toBeUndefined();
+    expect(usePreparation.getState().updateInfo({}, proposal.id)).toBe(true);
+    expect(usePreparation.getState().info).toEqual({ ...base, jobDescription: '' });
+  });
+
   it('无JD时按钮保存后普通聊天继续，并传递实际保存状态', async () => {
     usePreparation.setState({ info: { ...base, jobDescription: '' } });
     vi.mocked(streamChat).mockResolvedValueOnce({
@@ -533,7 +689,7 @@ describe('资料提案保存与后续聊天', () => {
     });
   });
   it.each(['确认', '拒绝', '确认更新', '确认保存', '只保存简历摘要', '只更新姓名'])(
-    '聊天文字不再操作提案或资料：%s',
+    '发送聊天文字不保存资料，并自动保留旧提案原资料：%s',
     async (text) => {
       await usePreparation.getState().send('更新简历');
       const proposal = usePreparation.getState().messages.at(-1)!;
@@ -548,8 +704,10 @@ describe('资料提案保存与后续聊天', () => {
       expect(usePreparation.getState().info).toEqual(base);
       const unchanged = usePreparation.getState().messages.find((m) => m.id === proposal.id)!;
       expect(unchanged.applied).not.toBe(true);
-      expect(unchanged.dismissed).not.toBe(true);
+      expect(unchanged.dismissed).toBe(true);
       expect(unchanged.selectedProfileFields).toEqual(proposal.selectedProfileFields);
+      const next = vi.mocked(streamChat).mock.calls.at(-1)![0];
+      expect(next.turns.find(turn => turn.role === 'assistant')?.content).toContain('已拒绝这份提案并保留旧资料，不再等待确认');
     },
   );
   it.each(['简历', '职位描述', '简历和职位描述'])(
@@ -692,6 +850,22 @@ describe('逐项勾选保存', () => {
       ...base,
       jobDescription: changes.jobDescription,
     });
+    expect(streamChat).toHaveBeenCalledTimes(1);
+  });
+  it('清空职位描述的提案只在确认保存后生效', async () => {
+    vi.mocked(streamChat).mockResolvedValueOnce({
+      ok: true,
+      usage: null,
+      sources: [],
+      profileChanges: { jobDescription: '' },
+    });
+    await usePreparation.getState().send('删除我的JD吧');
+    const message = usePreparation.getState().messages.at(-1)!;
+    expect(message).toMatchObject({ status: 'completed', changes: { jobDescription: '' } });
+    expect(usePreparation.getState().info).toEqual(base);
+    usePreparation.getState().selectProfileFields(message.id, ['jobDescription']);
+    expect(usePreparation.getState().updateInfo({}, message.id)).toBe(true);
+    expect(usePreparation.getState().info).toEqual({ ...base, jobDescription: '' });
     expect(streamChat).toHaveBeenCalledTimes(1);
   });
   it('未选字段的较新修改保留，所选字段及技能依赖摘要的冲突仍拒绝', async () => {

@@ -1,6 +1,7 @@
 import { captureRequested } from './capture-requested.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
+import packageInfo from '../../package.json' with { type: 'json' };
 import { testRoot, electron } from './test-workspace.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
 import { installUiAccount, connectUiAccount, closeUiApp } from './install-ui-account.mjs';
@@ -177,31 +178,47 @@ try {
       .locator('..');
     await licenseRow.waitFor();
     const row = await licenseRow.boundingBox();
-    const version = await settings.getByText('VoxCue', { exact: true }).locator('..').boundingBox();
+    const versionRow = settings.getByText('VoxCue', { exact: true }).locator('..');
+    const version = await versionRow.boundingBox();
     const automatic = await settings.getByRole('switch').boundingBox();
     assert.ok(row.y >= version.y + version.height - 1 && row.y + row.height <= automatic.y);
-    for (const [label, file, error] of [
+    for (const [label, url, error, scope] of [
       [
         'AGPL-3.0-only',
-        'LICENSE',
+        'https://github.com/NCFXZ/VoxCue/blob/main/LICENSE',
         english
           ? 'Could not open the open-source license. Please try again later.'
           : '无法打开开源协议，请稍后重试。',
+        licenseRow,
       ],
       [
         english ? 'Third-party licenses' : '第三方许可',
-        'THIRD_PARTY_NOTICES.md',
+        'https://github.com/NCFXZ/VoxCue/blob/main/THIRD_PARTY_NOTICES.md',
         english
           ? 'Could not open third-party licenses. Please try again later.'
           : '无法打开第三方许可，请稍后重试。',
+        licenseRow,
+      ],
+      [
+        english ? 'Release notes' : '更新日志',
+        `https://voxcue.com.cn/${english ? 'en/' : ''}changelog/`,
+        english
+          ? 'Could not open the release notes. Please try again later.'
+          : '无法打开更新日志，请稍后重试。',
+        versionRow,
       ],
     ]) {
-      const url = `https://github.com/NCFXZ/VoxCue/blob/main/${file}`;
-      const link = licenseRow.getByRole('link', { name: label, exact: true });
+      const link = scope.getByRole('link', { name: label, exact: true });
       assert.equal(await link.getAttribute('href'), url);
       assert.equal(await link.getAttribute('title'), null);
       const box = await link.boundingBox();
-      assert.ok(box.x >= row.x - 1 && box.x + box.width <= row.x + row.width + 1);
+      const bounds = await scope.boundingBox();
+      assert.ok(box.x >= bounds.x - 1 && box.x + box.width <= bounds.x + bounds.width + 1);
+      if (scope === versionRow) {
+        const number = await versionRow.getByText(packageInfo.version, { exact: true }).boundingBox();
+        assert.ok(number.x + number.width < box.x && number.y < box.y + box.height && box.y < number.y + number.height,
+          'Release notes stays beside the current version');
+      }
       await app.evaluate(() => {
         globalThis.feedbackFail = true;
       });
@@ -228,7 +245,7 @@ try {
   await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
   assert.deepEqual(errors, []);
   console.log(
-    'PASS sidebar/profile 240ms bidirectional animation frames, drag file card/theme/minimum/accessibility, repository and bilingual license links with keyboard/error/retry, layout and local external port; no production traffic',
+    'PASS sidebar/profile 240ms bidirectional animation frames, drag file card/theme/minimum/accessibility, repository, bilingual license and release-note page links with keyboard/error/retry, layout and local external port; no production traffic',
   );
 } finally {
   await closeUiApp(app);

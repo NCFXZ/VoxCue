@@ -75,6 +75,10 @@ Mac 在 `macos/` 串行运行 `node test/scripts/interview-real-audio-smoke.mjs 
 
 更新缓存定向入口：`update-cache.test.ts` 覆盖跨实例一小时缓存、失败重放、时钟回拨、强制检查、缓存损坏/写入失败及 stock 下载缓存恢复；`updates.test.ts` 保留检查、恢复、自动下载冷却、取消与安装保存约束，`desktop-ipc.test.ts` 核对主窗口主 frame 及可选 `force` 参数。共享 `updates-smoke.mjs` 使用隔离驱动验证真实按钮长按 5 秒、短按键盘、释放不重复检查及既有下载/保存退出流程。Windows `updates-native-smoke.mjs` 使用真实 NsisUpdater 与 owner loopback 服务验证重启不重复请求、完整包恢复和半成品退出清理；不执行安装器或访问线上发行源。Mac 同名本机入口先执行生产 adapter + Electron loopback 的缓存/签名恢复/慢流中断矩阵，再保留原 Sparkle 坏归档签名、取消与隔离安装场景；单测补在 Mac `update-driver.test.ts`、`updates.test.ts`。
 
+Windows 差分下载入口：在 `windows/` 执行 `node test/scripts/updates-differential-smoke.mjs --from-release=release/1.3.0/installer --to-release=release/installer`，或显式指定其他两份已签名发行目录。先用固定公钥核验清单并核对安装包 SHA512，再在 owner 临时缓存中通过生产 IP 分流、更新适配器及真实 NsisUpdater 下载；覆盖海外 GitHub 增量和大陆 CNB 增量／故障矩阵，选版、清单、blockmap 与安装包必须保持同源。成功场景必须只请求变化字节，旧包缺失、blockmap 缺失、Range 失败及差分校验失败必须转全量并通过最终校验。所有 Electron 传输仅限声明的本机回环端口，安装入口拒绝执行，正式发行文件只读。此项无需重新打包；单测和通用 native 入口不能代替它。
+
+镜像实测可显式追加 `--mirror-base=https://<下载源>/<路径>/`（末尾保留 `/`）。镜像目录下按 `v<版本>/<原始文件名>` 提供清单、安装包及新旧 blockmap。父进程匿名从该 HTTPS 源转发真实响应到声明的回环端口，Electron 仍保持离线隔离；只运行正常增量和 Range 失败后的全量下载，均核对已签名清单及完整 SHA512，不执行安装器。不支持 Range 的镜像不能算作增量通过，也不会把整包响应重复当成各个分段下载。
+
 Mac 五档入口 `test/scripts/ui-refinement-matrix.mjs` 以 `--list` 预览完整排程，默认执行全部组及 100/125/150/175/200% 缩放。`interview-effort-smoke.mjs` 纳入 Mac 功能矩阵，核对活动保存期间的 DOM/焦点、忙锁与失败回滚。菜单/弹窗退出快照使用独立 SVG 资源标识，`settings-smoke.mjs` 在浅深中间帧核对图标像素、mask 引用和身份隔离，`profile-selection-smoke.mjs` 保留即时解锁及快照清理。
 
 Mac 全量验证还需在 `macos/` 串行执行以下独立专项；默认功能矩阵不包含它们：

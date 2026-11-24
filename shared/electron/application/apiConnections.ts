@@ -5,18 +5,16 @@ import {
   type ApiProvider,
 } from '../contracts/apiConnections';
 import type { AuthSession } from '../contracts/auth';
-import type { AIChatService } from '../backend/chat/ports';
 import { publicFailure } from '../backend/chat/errors';
 import type { ApiCredentialStore } from '../backend/api/credentials';
-import type { ApiCredential } from '../backend/api/types';
+import type { ApiChatService, ApiCredential } from '../backend/api/types';
 
-type ApiChat = AIChatService & { invalidateModels(): void };
 function credentialFailure(error: unknown): never {
   if (error instanceof Error && 'path' in error) throw Error('无法访问本机 API 密钥记录。');
   throw error;
 }
 interface AdapterPorts {
-  chat(provider: ApiProvider, credential: () => Promise<ApiCredential>): ApiChat;
+  chat(provider: ApiProvider, credential: () => Promise<ApiCredential>): ApiChatService;
   balance(
     provider: ApiProvider,
     credential: ApiCredential,
@@ -26,7 +24,7 @@ interface AdapterPorts {
 
 /** One instance per VoxCue profile. Only verified replacements reach the credential store. */
 export class ProfileApiConnections {
-  private readonly services = new Map<ApiProvider, ApiChat>();
+  private readonly services = new Map<ApiProvider, ApiChatService>();
   private readonly lifetime = new AbortController();
   private mutation?: ApiProvider;
   constructor(
@@ -79,14 +77,14 @@ export class ProfileApiConnections {
     check: () => void,
     ownerSignal: AbortSignal,
   ) {
-    return this.change(config.provider, async () => {
+    const { provider } = config;
+    return this.change(provider, async () => {
       const signal = AbortSignal.any([this.lifetime.signal, ownerSignal]);
       const key = await prompt(signal);
       signal.throwIfAborted();
       if (key === null) return false;
       if (!/^[\x21-\x7e]{1,4096}$/.test(key)) return { inputError: 'API 密钥格式无效。' };
-      const { provider, ...settings } = config;
-      const credential: ApiCredential = { ...settings, key };
+      const credential: ApiCredential = { key };
       const candidate = this.adapters.chat(provider, async () => credential);
       try {
         const models = await candidate.models(true, signal);

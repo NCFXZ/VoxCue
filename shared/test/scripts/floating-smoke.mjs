@@ -5,6 +5,7 @@ import { closeUiApp } from './install-ui-account.mjs';
 import { installUiAccount } from './install-ui-account.mjs';
 import { exerciseInterviewWindowDrag } from './interview-window-drag.mjs';
 import { evaluateHistory } from './stored-history-fixture.mjs';
+import { captureRequested } from './capture-requested.mjs';
 
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
@@ -148,7 +149,57 @@ try {
     ),
     true,
   );
+  await floating.emulateMedia({ reducedMotion: 'no-preference' });
+  const captureWidths = await floating.evaluate(async () => {
+    const button = document.querySelector('.floating-capture');
+    const widths = [button.getBoundingClientRect().width];
+    button.click();
+    const start = performance.now();
+    while (performance.now() - start < 320) {
+      await new Promise(requestAnimationFrame);
+      widths.push(button.getBoundingClientRect().width);
+    }
+    return widths;
+  });
+  assert.ok(captureWidths.at(-1) - captureWidths[0] > 60, 'Reveal confirmation must expand on the initiating button');
+  assert.ok(captureWidths.some(width => width > captureWidths[0] + 2 && width < captureWidths.at(-1) - 2), 'Reveal confirmation must have real intermediate width frames');
+  const confirmCapture = floating.getByRole('button', { name: '确认显示面试窗口', exact: true });
+  await confirmCapture.waitFor();
+  assert.ok(await confirmCapture.evaluate(button => {
+    const bounds = button.getBoundingClientRect();
+    const label = button.querySelector('.button-morph-expanded').getBoundingClientRect();
+    return label.left >= bounds.left + 4 && label.right <= bounds.right - 4;
+  }), 'The confirmation must show the complete action and window name');
+  await captureRequested(floating.locator('.floating-toolbar'), 'capture-confirmation');
+  const protectedState = () => app.evaluate(({ BrowserWindow }) =>
+    BrowserWindow.getAllWindows().find(win => win.webContents.getURL().endsWith('#interview')).isContentProtected());
+  assert.equal(await protectedState(), true, 'First click must keep the window hidden');
+  await confirmCapture.press('Escape');
+  await floating.getByRole('button', { name: '关闭截图保护', exact: true }).waitFor();
+  assert.equal(await protectedState(), true, 'Cancelling must keep capture protection on');
   await floating.getByRole('button', { name: '关闭截图保护' }).click();
+  await confirmCapture.waitFor();
+  await floating.locator('.floating-brand').focus();
+  await floating.getByRole('button', { name: '关闭截图保护', exact: true }).waitFor();
+  assert.equal(await protectedState(), true, 'Losing focus must cancel without revealing the window');
+  await floating.getByRole('button', { name: '收起面试窗口', exact: true }).click();
+  await floating.getByRole('button', { name: '展开面试窗口', exact: true }).waitFor();
+  await floating.getByRole('button', { name: '关闭截图保护' }).click();
+  await confirmCapture.waitFor();
+  assert.ok(await confirmCapture.evaluate(button => {
+    const bounds = button.getBoundingClientRect();
+    return bounds.left >= 0 && bounds.right <= innerWidth;
+  }), 'The expanded confirmation must fit the collapsed canvas');
+  await confirmCapture.press('Escape');
+  await floating.getByRole('button', { name: '展开面试窗口', exact: true }).click();
+  await floating.getByRole('button', { name: '收起面试窗口', exact: true }).waitFor();
+  await floating.getByRole('button', { name: '关闭截图保护' }).click();
+  await confirmCapture.waitFor();
+  await floating.getByRole('button', { name: '关闭截图保护', exact: true }).waitFor();
+  assert.equal(await protectedState(), true, 'Confirmation timeout must leave the window hidden');
+  await floating.getByRole('button', { name: '关闭截图保护' }).click();
+  await confirmCapture.waitFor();
+  await confirmCapture.click();
   await floating.getByRole('button', { name: '开启截图保护', exact: true }).waitFor();
   assert.equal(
     await app.evaluate(({ BrowserWindow }) =>
@@ -158,6 +209,11 @@ try {
     ),
     false,
   );
+  await floating.getByRole('button', { name: '开启截图保护', exact: true }).click();
+  await floating.getByRole('button', { name: '关闭截图保护', exact: true }).waitFor();
+  assert.equal(await protectedState(), true, 'Hiding again must take effect without a confirmation');
+  await floating.getByRole('button', { name: '关闭截图保护', exact: true }).click();
+  await confirmCapture.click();
   await floating.screenshot({});
   const nativeBounds = () =>
     app.evaluate(({ BrowserWindow }) =>

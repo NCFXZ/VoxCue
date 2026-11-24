@@ -1,5 +1,9 @@
+import { compareVersions, stableVersionPattern, versionParts } from '../../contracts/versions';
+import { downloadUrl, type DownloadSource } from '../downloads';
+export { compareVersions } from '../../contracts/versions';
+export { releaseRepository } from '../downloads';
+
 export type ReleaseTarget = 'windows-x64' | 'macos-arm64';
-export const releaseRepository = 'NCFXZ/VoxCue';
 export const releasePageSize = 100;
 export const releasePageLimit = 10;
 export const manifestByteLimit = 128 * 1024;
@@ -10,27 +14,12 @@ export function releaseTarget(platform: string, arch: string): ReleaseTarget | u
   return undefined;
 }
 
-const stableVersionPattern =
-  '(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?';
-const stableVersion = new RegExp('^' + stableVersionPattern + '$');
-function versionParts(version: string) {
-  if (version.length > 80 || !stableVersion.test(version)) throw Error('Invalid stable version');
-  const parts = version.split('+')[0].split('.').map(Number);
-  if (!parts.every(Number.isSafeInteger)) throw Error('Invalid stable version');
-  return parts;
-}
-export function compareVersions(left: string, right: string) {
-  const a = versionParts(left),
-    b = versionParts(right);
-  for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] > b[i] ? 1 : -1;
-  return 0;
-}
-
 interface ReleaseAsset {
   name: string;
   size: number;
 }
 export interface ReleaseCandidate {
+  source?: DownloadSource;
   version: string;
   tag: string;
   publishedAt: number;
@@ -102,9 +91,7 @@ export function releaseCandidates(value: unknown, target: ReleaseTarget): Releas
 }
 
 export function releaseAssetUrl(candidate: ReleaseCandidate, name: string) {
-  return new URL(
-    `https://github.com/${releaseRepository}/releases/download/${encodeURIComponent(candidate.tag)}/${encodeURIComponent(name)}`,
-  );
+  return downloadUrl(candidate.source ?? 'github', candidate.tag, name);
 }
 
 /** Never claim an older page is latest if pagination cannot finish. */

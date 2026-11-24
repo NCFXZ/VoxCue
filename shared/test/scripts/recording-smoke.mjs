@@ -5,7 +5,7 @@ import path from 'node:path';
 import { mkdir, readFile, readdir } from 'node:fs/promises';
 import { testRoot, electron } from './test-workspace.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
-import { closeUiApp, connectUiAccount, focusUiWindow, installUiAccount } from './install-ui-account.mjs';
+import { closeUiApp, connectUiAccount, focusUiWindow, installUiAccount, showInterviewWindow } from './install-ui-account.mjs';
 import { holdControl } from './assert-download-button.mjs';
 import { assertMenuBackdrop } from './assert-menu-backdrop.mjs';
 import { captureRequested } from './capture-requested.mjs';
@@ -83,14 +83,14 @@ try {
   const protectedButton = floating.getByRole('button', { name: '关闭截图保护', exact: true, pressed: true });
   const visibleButton = floating.getByRole('button', { name: '开启截图保护', exact: true, pressed: false });
   const protectionIcon = (button) => process.platform === 'darwin'
-    ? button.locator('svg').getAttribute('data-sf-symbol')
-    : button.locator('svg path').getAttribute('d');
+    ? button.locator('.button-morph-idle svg').getAttribute('data-sf-symbol')
+    : button.locator('.button-morph-idle svg path').getAttribute('d');
   const original = await protectionIcon(protectedButton);
-  if (process.platform === 'darwin') await assertSystemSymbol(protectedButton, 'EyeOff', 'eye.slash', 20);
-  await protectedButton.click();
+  if (process.platform === 'darwin') await assertSystemSymbol(protectedButton.locator('.button-morph-idle'), 'EyeOff', 'eye.slash', 20);
+  await showInterviewWindow(floating);
   const unprotected = await protectionIcon(visibleButton);
   assert.notEqual(unprotected, original);
-  if (process.platform === 'darwin') await assertSystemSymbol(visibleButton, 'Eye', 'eye', 20);
+  if (process.platform === 'darwin') await assertSystemSymbol(visibleButton.locator('.button-morph-idle'), 'Eye', 'eye', 20);
   await visibleButton.click();
   assert.equal(await protectionIcon(protectedButton), original);
   await floating.emulateMedia({ reducedMotion: 'no-preference' });

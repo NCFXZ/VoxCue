@@ -1,33 +1,21 @@
-import type { ApiBalance, QwenRegion } from '../../contracts/apiConnections';
 import type { ChatModel, ReasoningEffort } from '../../contracts/chat';
 import { modelId, modelLabel } from '../chat/models';
-import type { ChatServiceError } from '../chat/errors';
+import type { AIChatService } from '../chat/ports';
 
 // Never crosses the preload boundary.
 export interface ApiCredential {
   key: string;
-  region?: QwenRegion;
-  workspace?: string;
+}
+
+export interface ApiChatService extends AIChatService {
+  invalidateModels(): void;
 }
 
 export interface ApiModel extends ChatModel {
   imageInput?: boolean;
-  pdfInput?: boolean;
-  adaptiveThinking?: boolean;
-  maxOutput?: number;
 }
 
-export type CatalogGet = (url: string, headers?: Record<string, string>) => Promise<unknown>;
-export interface CompatibleApi {
-  endpoint(credential: ApiCredential): string;
-  models(credential: ApiCredential, get: CatalogGet): Promise<ApiModel[]>;
-  reasoning?(model: ApiModel, effort: ReasoningEffort): Record<string, unknown>;
-  historyOptions?(model: ApiModel): Record<string, unknown>;
-  streamUsage?(model: ApiModel): boolean;
-  replayTextHistory?(model: ApiModel): boolean;
-  failure?(status: number, body: unknown): ChatServiceError | undefined;
-  balance?(credential: ApiCredential, get: CatalogGet): Promise<ApiBalance[]>;
-}
+export type CatalogGet = (url: string) => Promise<unknown>;
 
 export function catalogModel(id: unknown, label?: unknown): ApiModel | undefined {
   if (!modelId(id)) return;

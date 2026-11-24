@@ -1,9 +1,16 @@
 import type { ChatEvent } from '../../contracts/chat';
-import type { ProfileAnswerStream } from './profile';
+import type { ProfileGeneration, ProfilePreview } from '../../contracts/profile';
+
+/** A streamed proposal parser; previews stay read-only until its own final validation. */
+export interface ProfilePreviewSource {
+  readonly previewReady: boolean;
+  readonly generation?: ProfileGeneration;
+  preview(): ProfilePreview | undefined;
+}
 
 // Each request owns one pending preview. Answer text and final validation stay synchronous.
 export class ProfilePreviews {
-  private pending?: ProfileAnswerStream;
+  private pending?: ProfilePreviewSource;
   private timer?: ReturnType<typeof setTimeout>;
   private previous = '';
   private failure?: { error: unknown };
@@ -14,8 +21,8 @@ export class ProfilePreviews {
     private readonly signal: AbortSignal,
   ) {}
 
-  update(stream?: ProfileAnswerStream) {
-    if (!stream?.answerComplete || this.signal.aborted) return;
+  update(stream?: ProfilePreviewSource) {
+    if (!stream?.previewReady || this.signal.aborted) return;
     if (this.failure) throw this.failure.error;
     this.pending = stream;
     this.timer ??= setTimeout(() => {

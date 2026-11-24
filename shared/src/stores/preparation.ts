@@ -592,7 +592,15 @@ export const usePreparation = create<PreparationState>((set, get) => ({
       });
     const turnsToSend: ChatMessage[] = retryUser
       ? [...before.messages.slice(0, -2), { ...retryUser, options }]
-      : [...before.messages, { id: crypto.randomUUID(), role: 'user', content: text, options, startedAt: Date.now() }];
+      : [
+          ...before.messages.map((message) =>
+            message.role === 'assistant' && message.status === 'completed' &&
+            !message.applied && !message.dismissed && Object.keys(message.changes ?? {}).length
+              ? { ...message, dismissed: true }
+              : message,
+          ),
+          { id: crypto.randomUUID(), role: 'user', content: text, options, startedAt: Date.now() },
+        ];
     update({
       messages: [
         ...turnsToSend,
@@ -694,7 +702,7 @@ export const usePreparation = create<PreparationState>((set, get) => ({
                   message.id === id
                     ? {
                         ...message,
-                        content: message.content + event.text,
+                        content: (event.replace ? '' : message.content) + event.text,
                         activity: { phase: 'writing' as const },
                       }
                     : message,
@@ -780,7 +788,9 @@ export const usePreparation = create<PreparationState>((set, get) => ({
       }
     } catch (error) {
       const stopped = current.signal.aborted;
-      const partial = !stopped && error instanceof ChatRequestError ? error.partial : undefined;
+      const requestError = !stopped && error instanceof ChatRequestError ? error : undefined;
+      const discardPartial = requestError?.failure.discardPartial === true;
+      const partial = discardPartial ? undefined : requestError?.partial;
       const messageError = stopped
         ? undefined
         : error instanceof Error
@@ -803,10 +813,16 @@ export const usePreparation = create<PreparationState>((set, get) => ({
                 ...(partial?.sources !== undefined ? { sources: partial.sources } : {}),
                 ...(partial?.activities !== undefined ? { activities: partial.activities } : {}),
                 ...(partial?.activity !== undefined ? { activity: partial.activity } : {}),
+                ...(discardPartial ? {
+                  content: '',
+                  reasoningSummary: undefined,
+                  profilePreview: undefined,
+                  profileGeneration: undefined,
+                  sources: undefined,
+                } : {}),
                 status: stopped ? 'stopped' : 'failed',
                 error: messageError,
-                errorCode:
-                  !stopped && error instanceof ChatRequestError ? error.failure.code : undefined,
+                errorCode: requestError?.failure.code,
               }
             : message,
         ),

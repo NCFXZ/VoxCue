@@ -3003,7 +3003,8 @@ p {
   gap: 16px;
   margin-top: 12px;
 }
-.account-quota {
+.account-quota,
+.account-usage-card {
   display: grid;
   gap: 4px;
   min-width: 0;
@@ -3622,6 +3623,7 @@ article.account-quota > .interview-reveal :is(.account-quota-state, p) {
 }
 /* The body already provides the gap below the category heading. */
 .settings-content-body > .settings-entry:first-child,
+.settings-content-body > .settings-about-updates > .settings-entry:first-child,
 .settings-content-body > .cloud-account-panel > .settings-entry:first-child,
 .settings-content-body > .shortcut-settings > .shortcut-setting-row:first-child {
   min-height: 0;
@@ -3882,10 +3884,11 @@ article.account-quota > .interview-reveal :is(.account-quota-state, p) {
 .settings-value {
   flex-shrink: 0;
 }
-.settings-content .settings-usage {
+.settings-content .account-service .settings-usage {
   border: 0;
   border-radius: 0;
-  padding: 20px 0;
+  margin-inline: 12px;
+  padding: 14px 0 18px;
 }
 @media (max-width: 640px) {
   .app-dialog.settings-dialog {
@@ -3928,8 +3931,27 @@ article.account-quota > .interview-reveal :is(.account-quota-state, p) {
   justify-content: flex-end;
   gap: 8px;
 }
-.settings-usage > header .account-quota-heading > strong {
+.settings-usage .account-usage-card > header .account-quota-heading > strong {
   font-size: var(--type-body);
+}
+.account-usage-card {
+  padding: 8px 12px 12px;
+  row-gap: 0;
+}
+.account-usage-card > header {
+  margin-bottom: 0;
+}
+.account-usage-card .account-quota-list {
+  gap: 12px;
+}
+.account-usage-card .account-quota {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+}
+.account-usage-card .account-quota + .account-quota {
+  padding-block-start: 12px;
+  border-block-start: 1px solid var(--border);
 }
 .settings-usage .ui-button {
   padding: 6px 10px;
@@ -4025,8 +4047,9 @@ article.account-quota > .interview-reveal :is(.account-quota-state, p) {
   background: transparent;
 }
 .speech-controls {
+  --speech-section-gap: 14px;
   display: grid;
-  gap: 14px;
+  gap: var(--speech-section-gap);
   font-size: var(--type-body);
 }
 .speech-setting-row {
@@ -4296,7 +4319,7 @@ article.account-quota > .interview-reveal :is(.account-quota-state, p) {
   align-items: center;
   justify-content: space-between;
   min-height: var(--control-height);
-  margin-bottom: 8px;
+  margin-bottom: 12px;
 }
 .speech-section-heading h3 {
   margin: 0;
@@ -4307,6 +4330,7 @@ article.account-quota > .interview-reveal :is(.account-quota-state, p) {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 12px;
+  padding-block: 12px;
 }
 .speech-device {
   min-width: 0;
@@ -4735,7 +4759,7 @@ details[open] > summary > .disclosure-chevron {
   -webkit-app-region: no-drag;
   padding: 12px 16px;
 }
-.floating-end.ui-button {
+.floating-confirm-action.ui-button {
   position: relative;
   width: 32px;
   overflow: hidden;
@@ -4745,20 +4769,26 @@ details[open] > summary > .disclosure-chevron {
     background-color var(--button-morph-duration) var(--button-morph-easing),
     color var(--button-morph-duration) var(--button-morph-easing);
 }
-.floating-end.ui-button.is-confirming {
+.floating-confirm-action.ui-button.is-confirming {
   width: 104px;
   gap: 7px;
   border-radius: 999px;
   corner-shape: round;
 }
-.floating-end span {
+.floating-confirm-action span {
   white-space: nowrap;
 }
 :root:lang(en) .floating-end.ui-button.is-confirming {
   width: 136px;
 }
-:root:lang(en) .floating-end .button-morph-expanded {
+:root:lang(en) .floating-confirm-action .button-morph-expanded {
   margin-inline-start: 0;
+}
+.floating-capture.ui-button.is-confirming {
+  width: 184px;
+}
+:root:lang(en) .floating-capture.ui-button.is-confirming {
+  width: 208px;
 }
 .floating-composer {
   padding: 14px 16px 10px;
@@ -6440,6 +6470,13 @@ details[open] > summary > .disclosure-chevron {
   border-top: 1px solid var(--border);
   padding-top: 6px;
   margin-bottom: 0;
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+.interview-audio-settings > .audio-device-editor {
+  padding-top: 12px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--border);
 }
 .interview-model-settings {
   padding-bottom: 0;
@@ -7263,12 +7300,12 @@ small {
   transform: translate(-50%, calc(-50% + var(--button-morph-shift)));
 }
 .confirm-delete.is-confirming .confirm-delete-idle,
-.floating-end.is-confirming .button-morph-idle {
+.floating-confirm-action.is-confirming .button-morph-idle {
   opacity: 0;
   transform: translateY(calc(-1 * var(--button-morph-shift)));
 }
 .confirm-delete.is-confirming .confirm-delete-confirm,
-.floating-end.is-confirming .button-morph-expanded {
+.floating-confirm-action.is-confirming .button-morph-expanded {
   opacity: 1;
   transform: translate(-50%, -50%);
 }
@@ -7310,7 +7347,7 @@ small {
 }
 @media (prefers-reduced-motion: reduce) {
   .confirm-delete.ui-button,
-  .floating-end.ui-button,
+  .floating-confirm-action.ui-button,
   .confirm-delete-idle,
   .confirm-delete-confirm,
   .button-morph-idle,
@@ -7550,7 +7587,11 @@ small {
   border: 1px solid var(--border);
   border-radius: var(--radius-card);
   background: var(--surface);
-  box-shadow: var(--shadow-popup);
+  box-shadow: var(--shadow-raised);
+}
+.components-notice a.ui-button,
+.components-notice a.ui-button * {
+  cursor: default !important;
 }
 .component-notice-reveal > .interview-reveal-clip {
   overflow: clip;
@@ -7583,15 +7624,49 @@ small {
   border-radius: 999px;
   corner-shape: round;
 }
+.settings-notice-body > .announcement-actions {
+  display: flex;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-left: auto;
+}
+.announcement-notice p {
+  white-space: pre-wrap;
+}
 .chat-settings-notices {
+  --notice-gap: 8px;
   position: absolute;
   inset: 72px 0 auto;
-  display: grid;
-  gap: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--notice-gap);
   width: min(740px, calc(100% - 2 * var(--page-gutter)));
   margin: 0 auto;
   flex-shrink: 0;
   z-index: 2;
+}
+.chat-settings-notices > .component-notice-reveal {
+  margin-bottom: 0;
+  transition:
+    grid-template-rows var(--panel-motion-duration) var(--panel-motion-easing),
+    opacity var(--panel-motion-duration) ease-in-out,
+    margin-bottom var(--panel-motion-duration) var(--panel-motion-easing);
+}
+/* Fold the gap with its row, so removing the empty row cannot move the
+   remaining cards again after their first transition has already settled. */
+.chat-settings-notices > .component-notice-reveal[data-open='false'] {
+  margin-bottom: calc(0px - var(--notice-gap));
+}
+@starting-style {
+  .chat-settings-notices > .component-notice-reveal[data-open='true'] {
+    margin-bottom: calc(0px - var(--notice-gap));
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .chat-settings-notices > .component-notice-reveal { transition: none; }
 }
 .chat-settings-notices .components-notice {
   width: 100%;
@@ -8689,18 +8764,22 @@ svg[data-ui-icon] {
 .api-service-disclosure:focus-visible {
   outline: 2px solid var(--focus);
 }
-.api-service {
+.account-service .ai-service-label:disabled {
+  opacity: 1;
+}
+:is(.api-service, .account-service) {
   border-bottom: 1px solid var(--border);
 }
-.api-service > .settings-entry {
+:is(.api-service, .account-service) > .settings-entry {
   border-bottom: 0;
 }
-.api-service:has(.api-service-disclosure[aria-expanded='true']) > .settings-entry {
+.api-service:has(.api-service-disclosure[aria-expanded='true']) > .settings-entry,
+.account-service:has(.api-service-disclosure[aria-expanded='true']) > .settings-entry {
   min-height: 0;
   padding-bottom: 8px;
 }
 @media (prefers-reduced-motion: no-preference) {
-  .api-service > .settings-entry {
+  :is(.api-service, .account-service) > .settings-entry {
     transition: min-height var(--panel-motion-duration) var(--panel-motion-easing),
       padding-bottom var(--panel-motion-duration) var(--panel-motion-easing);
   }
@@ -8712,50 +8791,18 @@ svg[data-ui-icon] {
   padding: 0 12px 18px;
   font-size: var(--type-secondary);
 }
-.api-detail-row, .api-routing-fields, .api-routing-field, .api-key-value, .api-links {
+.api-detail-row, .api-key-value, .api-links {
   display: flex;
   align-items: center;
   min-width: 0;
   gap: 4px 12px;
-}
-.api-detail-row, .api-key-value, .api-links {
   flex-wrap: wrap;
-}
-.api-routing-fields {
-  column-gap: clamp(8px, 3%, 20px);
-  border-block-start: 1px solid var(--border);
-  padding-block-start: 8px;
 }
 .api-links {
   margin-inline-start: auto;
 }
-.api-routing-field {
-  column-gap: 8px;
-}
-.api-routing-field:last-child {
-  flex: 1;
-}
-.api-routing-field:only-child {
-  justify-content: space-between;
-}
-.api-routing-field > span:first-child {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.api-detail-row > span:first-child, .api-routing-field > span:first-child {
+.api-detail-row > span:first-child {
   color: var(--muted);
-}
-.api-routing-control {
-  flex: 1;
-  min-width: 6ch;
-  max-width: var(--settings-control-width);
-}
-.api-routing-field:only-child > .api-routing-control {
-  max-width: min(50%, var(--settings-control-width));
-}
-.api-routing-control.field-label, .api-routing-control.field-label input {
-  margin: 0;
 }
 .api-key-mask {
   color: var(--foreground);
@@ -8823,6 +8870,10 @@ svg[data-ui-icon] {
   line-height: var(--line-title);
   overflow-wrap: anywhere;
   font-variant-numeric: tabular-nums;
+}
+.api-balance-value {
+  display: block;
+  white-space: nowrap;
 }
 @container api-usage (max-width: 320px) {
   .api-usage-values {
@@ -9261,6 +9312,9 @@ svg.ui-loader {
 :where([data-settings-target], [data-settings-highlight-group])[data-location-highlight]::before {
   /* Cover the dividers and their antialiased edges at fractional display scales. */
   inset: -2px -12px;
+}
+.speech-controls > .remote-connection-settings[data-location-highlight]::before {
+  inset-block-end: calc(-2px - var(--speech-section-gap));
 }
 @media (forced-colors: active) {
   [data-location-highlight]::before {

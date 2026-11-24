@@ -80,7 +80,7 @@ try {
           (el) =>
             visible(el) &&
             !el.classList.contains('confirm-delete') &&
-            !el.matches('.floating-end:not(.is-confirming)') &&
+            !el.matches('.floating-confirm-action:not(.is-confirming)') &&
             el.clientWidth &&
             el.scrollWidth > el.clientWidth + 2,
         )

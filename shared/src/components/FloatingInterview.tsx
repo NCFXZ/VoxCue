@@ -94,6 +94,8 @@ export function FloatingInterview() {
   const failedAnswer = state.answers.at(-1)?.status === 'failed' ? state.answers.at(-1) : undefined;
   const saveError = useHistory((s) => s.error);
   const [protectedWindow, setProtected] = useState(true);
+  const [confirmCapture, setConfirmCapture] = useState(false);
+  const captureChanging = useRef(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const noticeError =
@@ -380,6 +382,16 @@ export function FloatingInterview() {
     return () => clearTimeout(timer);
   }, [confirmEnd, ending]);
   useEffect(() => {
+    if (!confirmCapture || busy) return;
+    const cancel = () => setConfirmCapture(false);
+    const timer = window.setTimeout(cancel, 3000);
+    window.addEventListener('blur', cancel);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener('blur', cancel);
+    };
+  }, [confirmCapture, busy]);
+  useEffect(() => {
     // Native window resizing can release pointer capture before pointerup.
     const move = (event: PointerEvent) => {
       if (!dragging.current) return;
@@ -467,6 +479,8 @@ export function FloatingInterview() {
     };
   }, []);
   async function toggleCapture() {
+    if (captureChanging.current) return;
+    captureChanging.current = true;
     setBusy(true);
     setError(null);
     try {
@@ -474,6 +488,7 @@ export function FloatingInterview() {
     } catch {
       setError('截图权限切换失败，状态未更改。');
     } finally {
+      captureChanging.current = false;
       setBusy(false);
     }
   }
@@ -679,16 +694,37 @@ export function FloatingInterview() {
               <Settings size={19} />
             </Button>
             <Button
-              variant="ghost"
-              size="icon"
+              className={`floating-capture floating-confirm-action ${confirmCapture ? 'is-confirming' : ''}`}
+              variant={confirmCapture ? 'destructive' : 'ghost'}
+              size={confirmCapture ? 'default' : 'icon'}
               disabled={busy}
               aria-pressed={protectedWindow}
-              aria-label={protectedWindow ? t('关闭截图保护') : t('开启截图保护')}
+              aria-label={confirmCapture ? t('确认显示面试窗口') : protectedWindow ? t('关闭截图保护') : t('开启截图保护')}
+              onBlur={() => setConfirmCapture(false)}
+              onKeyDown={event => {
+                if (event.key === 'Escape' && confirmCapture) {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  setConfirmCapture(false);
+                }
+              }}
               onClick={() => {
+                if (protectedWindow && !confirmCapture) {
+                  setConfirmCapture(true);
+                  setConfirmEnd(false);
+                  return;
+                }
+                setConfirmCapture(false);
                 void toggleCapture();
               }}
             >
-              {protectedWindow ? <EyeOff size={20} /> : <Eye size={20} />}
+              <span className="button-morph-idle" aria-hidden="true">
+                {protectedWindow ? <EyeOff size={20} /> : <Eye size={20} />}
+              </span>
+              <span className="button-morph-expanded" aria-hidden="true">
+                <Eye size={20} />
+                <span>{t('确认显示面试窗口')}</span>
+              </span>
             </Button>
             <Button variant="ghost" size="icon" className="floating-record"
               aria-label={state.recording ? t('停止录音') : t('开始录音')}
@@ -698,7 +734,7 @@ export function FloatingInterview() {
               <RecordingWave active={state.recording} />
             </Button>
             <Button
-              className={`floating-end ${confirmEnd ? 'is-confirming' : ''}`}
+              className={`floating-end floating-confirm-action ${confirmEnd ? 'is-confirming' : ''}`}
               disabled={ending}
               variant={confirmEnd ? 'destructive' : 'dangerGhost'}
               size={confirmEnd ? 'default' : 'icon'}

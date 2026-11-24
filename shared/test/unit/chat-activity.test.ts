@@ -32,7 +32,7 @@ describe('真实响应进度元数据', () => {
           type: 'response.output_item.done',
           item: { type: 'web_search_call', action: { type: 'open_page', url } },
         }),
-      ).toEqual({ phase: 'searching' });
+      ).toEqual({ phase: 'reading' });
     }
   });
 });

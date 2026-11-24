@@ -290,12 +290,12 @@ export async function checkManagementScrollbars({ app, main, directory }) {
   await settings
     .locator('.settings-entry')
     .filter({ hasText: 'ChatGPT' })
-    .getByRole('button', { name: '连接', exact: true })
+    .getByRole('button', { name: '登录', exact: true })
     .click();
   await settings
     .locator('.settings-entry')
     .filter({ hasText: 'ChatGPT' })
-    .getByRole('button', { name: '断开连接', exact: true })
+    .getByRole('button', { name: '禁用', exact: true })
     .waitFor();
   await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
   await main.getByRole('button', { name: '新对话', exact: true }).click();

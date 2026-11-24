@@ -247,7 +247,8 @@ try {
           const label = statusBody.getByText(text, { exact: true });
           await label.waitFor();
           assert.equal((await statusBody.innerText()).trim(), text, 'one primary status label');
-          assert.match(await progress.locator('.response-duration').innerText(), /^正在思考 .*秒$/);
+          assert.match(await progress.locator('.response-duration').innerText(),
+            text === '正在思考' ? /^正在思考 .*秒$/ : /^用时 .*秒$/);
           return label.evaluate(node => {
             const timer = node.closest('.response-progress').querySelector('.response-duration').getBoundingClientRect();
             const range = document.createRange();

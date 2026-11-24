@@ -305,12 +305,12 @@ try {
   const closeSettings = settings.getByRole('button', { name: '关闭设置', exact: true });
   await aiCategory.click();
   const chatgpt = settings.locator('[data-settings-target="chatgpt"]');
-  await chatgpt.getByRole('button', { name: '断开连接', exact: true }).click();
-  await chatgpt.getByRole('button', { name: '连接', exact: true }).waitFor();
+  await chatgpt.getByRole('button', { name: '退出登录', exact: true }).click();
+  await chatgpt.getByRole('button', { name: '登录', exact: true }).waitFor();
   await closeSettings.click();
   for (const launch of [page.locator('.interview-start-trigger'), guide.getByRole('button', { name: '开始面试', exact: true })]) {
     await launch.click();
-    await chatgpt.getByRole('button', { name: '连接', exact: true }).waitFor();
+    await chatgpt.getByRole('button', { name: '登录', exact: true }).waitFor();
     assert.equal(await aiCategory.getAttribute('aria-current'), 'page');
     await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
     assert.equal(await settings.locator('[data-location-highlight]').count(), 0);

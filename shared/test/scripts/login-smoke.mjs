@@ -103,7 +103,7 @@ try {
       globalThis.__loginURL = url;
     };
   });
-  await ai.getByRole('button', { name: '连接', exact: true }).click();
+  await ai.getByRole('button', { name: '登录', exact: true }).click();
   await page.getByRole('button', { name: '取消授权', exact: true }).waitFor();
   let address;
   for (let attempt = 0; attempt < 100; attempt++) {
@@ -120,12 +120,12 @@ try {
   await page.getByRole('button', { name: '取消授权', exact: true }).click();
   const alert = page.locator('.ai-services-panel').getByRole('alert');
   await alert.filter({ hasText: /^登录已取消或超时，请重试。$/ }).waitFor();
-  assert.ok(await ai.getByRole('button', { name: '连接', exact: true }).isEnabled());
+  assert.ok(await ai.getByRole('button', { name: '登录', exact: true }).isEnabled());
   assert.equal(await page.evaluate(() => window.desktop.authSession('chatgpt')), null);
   await app.evaluate(() => {
     globalThis.__loginURL = '';
   });
-  await ai.getByRole('button', { name: '连接', exact: true }).click();
+  await ai.getByRole('button', { name: '登录', exact: true }).click();
   for (let attempt = 0; attempt < 100; attempt++) {
     address = await app.evaluate(() => globalThis.__loginURL);
     if (address) break;
@@ -137,7 +137,7 @@ try {
   assert.equal(new URL(retryAuthorization.searchParams.get('redirect_uri')).hostname, '127.0.0.1');
   await app.evaluate(() => globalThis.__declineManagedLogin());
   await alert.filter({ hasText: /^ChatGPT 登录未完成，请重试。$/ }).waitFor();
-  assert.ok(await ai.getByRole('button', { name: '连接', exact: true }).isEnabled());
+  assert.ok(await ai.getByRole('button', { name: '登录', exact: true }).isEnabled());
   assert.equal(await page.evaluate(() => window.desktop.authSession('chatgpt')), null);
   // DPAPI on Windows, Chromium's synthetic Keychain on Mac. Never access a real
   // Safe Storage password merely because userData is an isolated directory.

@@ -9,11 +9,10 @@ import {
   Dismiss24Regular,
   Eye24Regular,
   EyeOff24Regular,
-  ChatAdd24Regular,
+  CommentEdit24Regular,
   History24Regular,
   Database24Regular,
   Settings24Regular,
-  SignOut24Regular,
   PanelLeftContract24Regular,
   PanelLeftExpand24Regular,
   ArrowUpRight24Regular,
@@ -61,6 +60,7 @@ import {
   Screenshot24Regular,
   Save24Regular,
   DocumentText24Regular,
+  TextBulletListSquare24Regular,
   FontIncreaseRegular,
   FontDecreaseRegular,
   CloudCheckmark24Regular,
@@ -109,7 +109,7 @@ export const Square = icon(Square24Regular);
 export const X = icon(Dismiss24Regular);
 export const Eye = icon(Eye24Regular);
 export const EyeOff = icon(EyeOff24Regular);
-export const MessageCirclePlus = icon(ChatAdd24Regular);
+export const CommentEdit = icon(CommentEdit24Regular);
 export const History = icon(History24Regular);
 export const Database = icon(Database24Regular);
 export const CloudDone = icon(CloudCheckmark24Regular);
@@ -124,7 +124,8 @@ export const CloudError = icon(CloudError24Regular);
 
 export const ChevronsUpDown = icon(ChevronDown24Regular);
 export const Settings = icon(Settings24Regular);
-export const LogOut = icon(SignOut24Regular);
+export { LogIn } from './LoginIcon';
+export { LogOut } from './LogoutIcon';
 export const PanelLeftClose = icon(PanelLeftContract24Regular);
 export const PanelLeftOpen = icon(PanelLeftExpand24Regular);
 export const ArrowUpRight = icon(ArrowUpRight24Regular);
@@ -164,5 +165,6 @@ export const Person = icon(Person24Regular);
 export const Screenshot = icon(Screenshot24Regular);
 export const Save = icon(Save24Regular);
 export const FileText = icon(DocumentText24Regular);
+export const ListSquare = icon(TextBulletListSquare24Regular);
 export const FontIncrease = icon(FontIncreaseRegular);
 export const FontDecrease = icon(FontDecreaseRegular);

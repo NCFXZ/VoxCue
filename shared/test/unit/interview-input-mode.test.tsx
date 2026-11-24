@@ -108,7 +108,7 @@ it('keeps device headings primary, removes their icons, and shows the disabled r
     'disabled=""',
   );
   expect(transcription).toMatch(
-    /class="speech-device speech-setting-row "><div class="speech-device-heading speech-setting-label"><strong>系统音频<\/strong>/,
+    /class="speech-device speech-setting-row "[^>]*><div class="speech-device-heading speech-setting-label"><strong>系统音频<\/strong>/,
   );
   expect(transcription.match(/<button[^>]*aria-label="麦克风设备"[^>]*>/)?.[0]).not.toContain(
     'disabled=""',

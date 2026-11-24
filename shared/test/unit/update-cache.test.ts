@@ -29,6 +29,7 @@ import * as releaseModule from '../../../shared/electron/backend/updates/release
 import * as providerModule from '../../../shared/electron/backend/updates/provider';
 import * as cacheModule from '../../../shared/electron/backend/updates/cache';
 import * as updateContracts from '../../../shared/electron/contracts/updates';
+import { regionLookup } from '../../electron/backend/downloads';
 
 vi.mock('node:fs', async (original) => {
   const fs = await original<typeof import('node:fs')>();
@@ -178,7 +179,8 @@ function setup(
   const driver = configurePlatformUpdates(
     updater as unknown as AppUpdater,
     'windows-x64',
-    requests,
+    (input, init) => String(input) === regionLookup
+      ? Promise.resolve(new Response('loc=GB\n')) : requests(input, init),
     { cacheDirectory: cacheDirectory(), ...options },
   );
   return { updater, requests, driver };

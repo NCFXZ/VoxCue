@@ -1,8 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { t } from '../i18n';
-import { Button } from './ui/button';
-import { X } from './icons';
+import { NoticeCloseButton } from './NoticeActions';
 import { useDropdownSurfaceMotion } from './ui/useDropdownSurfaceMotion';
 
 export function InterviewNotice({ noticeKey, container, title, description, role = 'alert', children }: {
@@ -24,10 +23,7 @@ export function InterviewNotice({ noticeKey, container, title, description, role
           <div>
             <div className="interview-notice-heading">
               <strong>{title}</strong>
-              <Button variant="ghost" size="icon" className="interview-notice-close"
-                data-reveal-on-hover aria-label={t('关闭提示')} onClick={() => setDismissed(noticeKey)}>
-                <X size={16} />
-              </Button>
+              <NoticeCloseButton className="interview-notice-close" label={t('关闭提示')} onClick={() => setDismissed(noticeKey)} />
             </div>
             {description && <p>{description}</p>}
           </div>

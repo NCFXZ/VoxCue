@@ -100,6 +100,13 @@ export async function assertSettingsHighlight(row, { keyboard = false } = {}) {
     const panel = row.closest('.components-panel');
     const panelStyle = panel && getComputedStyle(panel);
     const group = row.closest('.component-group');
+    const scope = row.closest('.settings-content, .interview-settings-dialog');
+    const bounds = row.getBoundingClientRect();
+    const scopeBounds = scope?.getBoundingClientRect();
+    const previous = row.previousElementSibling;
+    const heading = previous?.matches('h3') ? previous : previous?.querySelector(':scope > h3');
+    const separateHeadingGap = heading ? bounds.top + parseFloat(style.borderTopWidth) + parseFloat(skin.top) +
+      parseFloat(skin.marginTop) - heading.getBoundingClientRect().bottom : undefined;
     let headingClearance;
     if (group?.querySelector(':scope > .component-row') === row) {
       const heading = group.querySelector(':scope > h3');
@@ -114,6 +121,13 @@ export async function assertSettingsHighlight(row, { keyboard = false } = {}) {
       width: parseFloat(skin.width),
       rowWidth: row.clientWidth,
       panelWidth: panel?.clientWidth,
+      scopeMargins: scopeBounds && [
+        bounds.left + parseFloat(style.borderLeftWidth) + parseFloat(skin.left) - scopeBounds.left,
+        scopeBounds.right - bounds.right + parseFloat(style.borderRightWidth) + parseFloat(skin.right),
+      ],
+      separateHeadingGap,
+      bottomExtension: row.matches('.speech-controls > .remote-connection-settings')
+        ? parseFloat(getComputedStyle(row.parentElement).rowGap) : 0,
       dark: document.documentElement.classList.contains('dark'),
       height: parseFloat(skin.height),
       rowHeight: row.clientHeight,
@@ -157,11 +171,15 @@ export async function assertSettingsHighlight(row, { keyboard = false } = {}) {
   const { panel } = result;
   const left = panel ? panel.leftInset : 12;
   const right = panel ? panel.rightInset : 12;
-  assert.deepEqual(result.edges, [-2, -right, -2, -left]);
+  assert.deepEqual(result.edges, [-2, -right, -2 - result.bottomExtension, -left]);
   const expectedWidth = result.panelWidth ?? result.rowWidth + left + right;
   assert.ok(Math.abs(result.width - expectedWidth) <= 1, JSON.stringify(result));
-  assert.ok(Math.abs(result.height - (result.rowHeight + 4)) <= 1, JSON.stringify(result));
+  assert.ok(Math.abs(result.height - (result.rowHeight + 4 + result.bottomExtension)) <= 1, JSON.stringify(result));
   assert.deepEqual(result.radii, ['0px', '0px', '0px', '0px']);
+  if (result.scopeMargins) assert.ok(result.scopeMargins.every(value => value >= 11),
+    'Settings highlights must retain horizontal outer margins: ' + JSON.stringify(result));
+  if (result.separateHeadingGap !== undefined && !panel) assert.ok(result.separateHeadingGap >= 9.9,
+    'A standalone heading must stay outside the highlight with at least 10px clearance: ' + JSON.stringify(result));
   if (panel) {
     if (panel.headingClearance) {
       assert.equal(panel.headingClearance.padding, 12);

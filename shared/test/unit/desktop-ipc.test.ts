@@ -1,6 +1,8 @@
 import { registerKnowledgeIpc } from '../../../shared/electron/ipc/knowledge';
 import { registerApiConnectionIpc } from '../../../shared/electron/ipc/apiConnections';
 import { registerUpdateIpc } from '../../../shared/electron/ipc/updates';
+import { registerAnnouncementIpc } from '../../../shared/electron/ipc/announcements';
+import type { AnnouncementService } from '../../../shared/electron/backend/announcements';
 import { registerComponentIpc } from '../../../shared/electron/ipc/components';
 import type { ComponentService } from '../../../shared/electron/backend/components/service';
 import { registerScreenCaptureIpc } from '../../../shared/electron/ipc/screenCapture';
@@ -58,6 +60,29 @@ import {
 import { defaultInterviewConfiguration } from '../../../shared/src/services/speech';
 import { registerTelemetryIpc } from '../../../shared/electron/ipc/telemetry';
 import type { Telemetry } from '../../../shared/electron/backend/telemetry/service';
+
+describe('announcement IPC boundary', () => {
+  it('only reads the fixed feed for the owned main frame and uses the trusted account state', async () => {
+    const sender = { mainFrame: {} };
+    let signedIn = false;
+    const service = { read: vi.fn(async () => ({ ok: true, announcements: [] })) };
+    registerAnnouncementIpc(service as unknown as AnnouncementService, event => {
+      if (event.sender !== sender) throw Error('Unauthorized window');
+    }, () => signedIn);
+    const route = bridge.handlers.get('announcements:read')!;
+    const event = { sender, senderFrame: sender.mainFrame };
+    expect(() => route({ sender: {}, senderFrame: {} })).toThrow('Unauthorized window');
+    expect(() => route({ sender, senderFrame: {} })).toThrow('Unauthorized frame');
+    expect(() => route(event, { url: 'https://elsewhere.test/', signedIn: true })).toThrow();
+    await route(event);
+    expect(service.read).toHaveBeenLastCalledWith(false);
+    signedIn = true;
+    await route(event);
+    expect(service.read).toHaveBeenLastCalledWith(true);
+    await bridge.api!.announcements();
+    expect(bridge.invoke).toHaveBeenLastCalledWith('announcements:read');
+  });
+});
 
 describe('statistics IPC boundary', () => {
   it('accepts only fixed signals from the owning main frame and never accepts caller identity/content', () => {
@@ -215,7 +240,7 @@ describe('API key IPC boundary', () => {
     });
     const operations = {
       list: [],
-      configure: [{ provider: 'qwen' }, dialogId, field],
+      configure: [{ provider: 'deepseek' }, dialogId, field],
       control: [dialogId, { action: 'submit' }],
       remove: ['openai'],
       balance: ['deepseek'],
@@ -233,31 +258,34 @@ describe('API key IPC boundary', () => {
     for (const config of [
       { provider: 'unknown' },
       { provider: 'openai', key: 'synthetic' },
-      { provider: 'qwen', baseUrl: 'https://example.test' },
-      { provider: 'qwen', region: 'tokyo' },
+      { provider: 'qwen' },
+      { provider: 'deepseek', baseUrl: 'https://example.test' },
     ]) await expect(call('configure', owner, config, dialogId, field)).rejects.toThrow();
-    await expect(call('configure', owner, { provider: 'kimi' }, dialogId, { ...field, width: NaN })).rejects.toThrow();
+    await expect(call('configure', owner, { provider: 'deepseek' }, dialogId, { ...field, width: NaN })).rejects.toThrow();
     await expect(call('control', owner, dialogId, { action: 'submit', key: 'synthetic' })).rejects.toThrow();
     await expect(call('control', owner, dialogId, { action: 'visibility', visible: 'yes' })).rejects.toThrow();
     for (const op of ['remove', 'balance']) {
       await expect(call(op, owner, 'unknown')).rejects.toThrow();
+      await expect(call(op, owner, 'qwen')).rejects.toThrow();
     }
     await expect(call('open', owner, 'openai', 'https://example.test')).rejects.toThrow();
     await expect(call('open', owner, 'unknown', 'billing')).rejects.toThrow();
+    await expect(call('open', owner, 'qwen', 'keys')).rejects.toThrow();
     for (const operation of [...Object.values(service), checkChange, open]) {
       expect(operation).not.toHaveBeenCalled();
     }
 
     for (const [op, args] of Object.entries(operations)) await call(op, owner, ...args);
     expect(service.configure).toHaveBeenCalledWith(
-      { provider: 'qwen', region: 'beijing' },
+      { provider: 'deepseek' },
       expect.any(Function),
       expect.any(Function),
       expect.any(AbortSignal),
     );
-    expect(checkChange.mock.calls).toEqual([['qwen', false], ['openai', true]]);
+    expect(checkChange.mock.calls).toEqual([['deepseek', false], ['openai', true]]);
     expect(service.balance).toHaveBeenCalledWith('deepseek');
-    await call('open', owner, 'gemini', 'billing');
+    await call('open', owner, 'deepseek', 'keys');
+    await call('open', owner, 'deepseek', 'billing');
     const waiting = Promise.withResolvers<boolean>();
     service.configure.mockImplementationOnce(() => waiting.promise);
     const configuring = call('configure', owner, ...operations.configure);
@@ -270,7 +298,8 @@ describe('API key IPC boundary', () => {
     expect(await configuring).toBe(false);
     expect(open.mock.calls).toEqual([
       ['https://platform.openai.com/api-keys'],
-      ['https://aistudio.google.com/billing'],
+      ['https://platform.deepseek.com/api_keys'],
+      ['https://platform.deepseek.com/usage'],
     ]);
   });
 });
@@ -869,6 +898,9 @@ describe('完整面试问题通过既有 AI 接口', () => {
     });
     await call('interview:answer', question);
     expect(captureScreen).not.toHaveBeenCalled();
+    expect(chat.stream.mock.calls[0][0]).toMatchObject({ webSearch: false });
+    expect(chat.stream.mock.calls[0][0].instructions).toContain('本次请求未提供联网检索工具');
+    expect(chat.stream.mock.calls[0][0]).not.toHaveProperty('profile');
     expect(chat.stream.mock.calls[0][0].instructions).toContain(
       '回答语言：简体中文\n\n本场补充要求：\n无\n',
     );
@@ -1136,6 +1168,7 @@ describe('受控 preload 契约', () => {
       ['finishRemoteCommand', 'remote:complete', [{ requestId: 'request-id', ok: true }]],
       ['accountData', 'account:data', [{ action: 'begin', files: 1 }]],
       ['updates', 'updates:call', [{ op: 'check' }]],
+      ['announcements', 'announcements:read', []],
       ['components', 'components:call', [{ op: 'download', id: 'rag' }]],
       ['updateSessionState', 'session:state', [true]],
       ['finishSessionClose', 'session:close-ready', ['close-id', true]],
@@ -1169,6 +1202,8 @@ describe('受控 preload 契约', () => {
       ['setUILanguage', 'appearance:language', ['en']],
       ['systemAccent', 'appearance:accent', []],
       ['authSession', 'auth:session', []],
+      ['accountConnections', 'auth:accounts', []],
+      ['disableAIService', 'auth:disable', []],
       ['cloudAccount', 'cloud:account', [{ action: 'status' }]],
       ['openUserAgreement', 'session:open-user-agreement', ['en']],
       ['setLocalMode', 'session:local-mode', [true]],
@@ -1213,6 +1248,10 @@ describe('受控 preload 契约', () => {
       expect(bridge.invoke).toHaveBeenLastCalledWith(channel, ...args);
     }
     const configuration = defaultInterviewConfiguration();
+    await api.signOut('copilot');
+    expect(bridge.invoke).toHaveBeenLastCalledWith('auth:sign-out', 'copilot');
+    await api.chatAccountUsage('copilot');
+    expect(bridge.invoke).toHaveBeenLastCalledWith('chat:account-usage', 'copilot');
     await api.openInterview(configuration, 17);
     expect(bridge.invoke).toHaveBeenLastCalledWith('interview:open', configuration, 17);
     expect(Object.keys(api).sort()).toEqual(
@@ -1249,8 +1288,8 @@ describe('受控 preload 契约', () => {
       ].sort(),
     );
     expect(Object.keys(api.apiConnections).sort()).toEqual(['balance', 'configure', 'control', 'list', 'onTab', 'open', 'remove']);
-    await api.apiConnections.configure({ provider: 'qwen', region: 'beijing' }, dialogId, field);
-    expect(bridge.invoke).toHaveBeenLastCalledWith('api-keys:configure', { provider: 'qwen', region: 'beijing' }, dialogId, field);
+    await api.apiConnections.configure({ provider: 'deepseek' }, dialogId, field);
+    expect(bridge.invoke).toHaveBeenLastCalledWith('api-keys:configure', { provider: 'deepseek' }, dialogId, field);
     for (const service of ['chatgpt', 'copilot', 'deepseek', 'demo', 'startup'] as const) {
       await api.authSession(service);
       expect(bridge.invoke).toHaveBeenLastCalledWith('auth:session', service);
@@ -1397,8 +1436,10 @@ function setup(demo = false) {
     stream: vi.fn<AIChatService['stream']>(async () => completion),
   };
   const openLink = vi.fn(async () => {});
+  const accountUsage = vi.fn(async (_service: 'chatgpt' | 'copilot') => null);
   const lifecycle = registerChatIpc({
     chat,
+    accountUsage,
     openLink,
     isDemo: () => demo,
     requireMain: (value) => {
@@ -1407,7 +1448,7 @@ function setup(demo = false) {
   });
   const call = (channel: string, ...args: unknown[]) =>
     bridge.handlers.get(channel)!(event, ...args);
-  return { chat, openLink, lifecycle, call, sender };
+  return { chat, openLink, accountUsage, lifecycle, call, sender };
 }
 describe('聊天 IPC 与应用层边界', () => {
   it('准备页模型目录仅接受可选布尔刷新参数', async () => {
@@ -1437,10 +1478,45 @@ describe('聊天 IPC 与应用层边界', () => {
       ['chat:event', { id: request.id, type: 'delta', text: ' second third' }],
     ]);
   });
-  it('账户额度只接受主窗口主 frame 的零参数读取，不接收账户、令牌或 URL', async () => {
+  it('does not return or flush withheld partial chat output after a terminal refusal', async () => {
     const { chat, call, sender } = setup();
+    const failure = { code: 'content_filter', message: '模型服务拒绝了这次请求。', discardPartial: true };
+    const first = { id: request.id, type: 'delta', text: 'first' } as const;
+    const queued = { id: request.id, type: 'delta', text: ' withheld' } as const;
+    chat.stream.mockImplementationOnce(async (_request, emit) => {
+      emit(first);
+      emit(queued);
+      throw new ChatServiceError(failure);
+    });
+    expect(await call('chat:send', request)).toEqual({ ok: false, error: failure });
+    expect(sender.send.mock.calls).toEqual([['chat:event', first]]);
+  });
+  it('keeps only the replacement attempt in a failed chat partial and its delivered text', async () => {
+    const { chat, call, sender } = setup();
+    chat.stream.mockImplementationOnce(async (_request, emit) => {
+      emit({ id: request.id, type: 'delta', text: '旧草稿' });
+      emit({ id: request.id, type: 'delta', text: '未发送的旧后缀' });
+      emit({ id: request.id, type: 'delta', text: '新回答', replace: true });
+      emit({ id: request.id, type: 'delta', text: '已收到的后续' });
+      throw new ChatServiceError({ code: 'network_error', message: '合成连接中断' });
+    });
+    expect(await call('chat:send', request)).toMatchObject({
+      ok: false, partial: { answerText: '新回答已收到的后续' },
+    });
+    expect(sender.send.mock.calls).toEqual([
+      ['chat:event', { id: request.id, type: 'delta', text: '旧草稿' }],
+      ['chat:event', { id: request.id, type: 'delta', text: '新回答', replace: true }],
+      ['chat:event', { id: request.id, type: 'delta', text: '已收到的后续' }],
+    ]);
+  });
+  it('账户额度只接受主窗口主 frame 与固定服务名称，不接收账户、令牌或 URL', async () => {
+    const { chat, call, sender, accountUsage } = setup();
     expect(await call('chat:account-usage')).toEqual({ ok: true, usage: null });
     chat.accountUsage.mockClear();
+    expect(await call('chat:account-usage', 'copilot')).toEqual({ ok: true, usage: null });
+    expect(accountUsage).toHaveBeenCalledExactlyOnceWith('copilot');
+    for (const args of [['openai'], ['chatgpt', {}]])
+      await expect(call('chat:account-usage', ...args)).rejects.toThrow('Invalid request');
     await expect(
       call('chat:account-usage', { token: 'private', url: 'https://example.test' }),
     ).rejects.toThrow('Invalid request');

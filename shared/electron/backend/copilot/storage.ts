@@ -2,8 +2,8 @@ import { app } from 'electron';
 import { mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { atomicFile } from '../atomicFile';
-import type { AIService, AuthSession } from '../../contracts/auth';
-import { isApiProvider } from '../../contracts/apiConnections';
+import type { AccountConnection, AccountService, AIService, AuthSession, AuthUser } from '../../contracts/auth';
+import { isApiProvider, isRetiredApiProvider } from '../../contracts/apiConnections';
 import type { CopilotLoginStorage } from './auth';
 
 // Identity and selection only. OAuth tokens stay in the official runtime's OS vault.
@@ -37,6 +37,63 @@ async function writeJson(file: string, value: unknown) {
   await mkdir(path.dirname(file), { recursive: true });
   await atomicFile(file, JSON.stringify(value));
 }
+// Display metadata only; enabling still verifies the official runtime's session.
+export function createAccountServiceStorage(root = app.getPath('userData')) {
+  const file = path.join(root, 'auth-data', 'account-services.json');
+  let connections: AccountConnection[] = [];
+  let closed = false;
+  let repaired = false;
+  let writing = Promise.resolve();
+  const ready = readJson(file).then((stored) => {
+    if (stored === null) return;
+    if (!Array.isArray(stored) || stored.length > 2)
+      throw Error('登录状态记录无效，请重新登录。');
+    const parsed = stored.map((entry): AccountConnection => {
+      const value = typeof entry === 'string' ? { service: entry, name: '', email: '' } : entry;
+      if (!value || (value.service !== 'chatgpt' && value.service !== 'copilot') ||
+          [value.name, value.email].some(field => typeof field !== 'string' ||
+            field.length > 512 || /[\u0000-\u001f\u007f]/.test(field)))
+        throw Error('登录状态记录无效，请重新登录。');
+      return { service: value.service, name: value.name, email: value.email };
+    });
+    connections = [...new Map(parsed.map(entry => [entry.service, entry])).values()];
+  });
+  void ready.catch(() => {});
+  return {
+    async list() {
+      await ready.catch((error) => { if (!repaired) throw error; });
+      await writing;
+      if (closed) throw Error('账号已变化，请重新操作。');
+      return connections.map(entry => entry.service);
+    },
+    async details() {
+      await ready.catch((error) => { if (!repaired) throw error; });
+      await writing;
+      if (closed) throw Error('账号已变化，请重新操作。');
+      return connections.map(entry => ({ ...entry }));
+    },
+    set(service: AccountService, signedIn: boolean, user?: Pick<AuthUser, 'name' | 'email'>) {
+      const job = writing.catch(() => {}).then(async () => {
+        await ready.catch(() => {});
+        if (closed) throw Error('账号已变化，请重新操作。');
+        const previous = connections.find(item => item.service === service);
+        const next = connections.filter((item) => item.service !== service);
+        if (signedIn) next.push({ service,
+          name: user?.name ?? previous?.name ?? '', email: user?.email ?? previous?.email ?? '',
+        });
+        await writeJson(file, next);
+        connections = next;
+        repaired = true;
+      });
+      writing = job;
+      return job;
+    },
+    dispose() {
+      closed = true;
+      return writing.catch(() => {});
+    },
+  };
+}
 export function createServiceSelection(root = app.getPath('userData')) {
   const file = path.join(root, 'auth-data', 'service.json');
   type Selection = { service: AIService; connected: boolean | null };
@@ -50,12 +107,22 @@ export function createServiceSelection(root = app.getPath('userData')) {
     if (stored === null) return;
     // Both previous releases wrote this string only following a successful login.
     // They left it behind on logout, so an actual provider check is still needed.
-    if (stored === 'chatgpt' || stored === 'copilot') value = { service: stored, connected: true };
-    else if (
-      stored.version === 2 && (stored.service === 'chatgpt' || stored.service === 'copilot' || isApiProvider(stored.service)) &&
-      typeof stored.connected === 'boolean'
-    ) value = { service: stored.service, connected: stored.connected };
-    else throw Error('模型服务选择无效，请重新登录。');
+    if (stored === 'chatgpt' || stored === 'copilot') {
+      value = { service: stored, connected: true };
+      return;
+    }
+    if (stored.version === 2 && typeof stored.connected === 'boolean') {
+      const { service, connected } = stored;
+      if (service === 'chatgpt' || service === 'copilot' || isApiProvider(service)) {
+        value = { service, connected };
+        return;
+      }
+      if (isRetiredApiProvider(service)) {
+        value = { service: 'chatgpt', connected: false };
+        return;
+      }
+    }
+    throw Error('模型服务选择无效，请重新登录。');
   });
   const save = async (service: AIService, connected: boolean) => {
     if (closed) throw Error('账号已变化，请重新操作。');

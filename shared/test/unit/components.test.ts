@@ -50,6 +50,17 @@ async function fixture() {
   return { root, pkg, bytes, data, fetcher, service };
 }
 describe('独立组件下载与版本缓存', () => {
+  it('大陆组件下载使用同一固定 CNB 仓库，继续校验归档及解包后的摘要', async () => {
+    const f = await fixture();
+    const source = vi.fn(async () => 'cnb' as const);
+    const service = new ComponentService({ root: f.root, packages: [f.pkg], managed: true,
+      fetch: f.fetcher as typeof fetch, source, emit() {} });
+    expect((await service.download()).phase).toBe('ready');
+    expect(source).toHaveBeenCalledOnce();
+    expect(f.fetcher).toHaveBeenCalledWith('https://cnb.cool/voxcue-release/voxcue-release/-/releases/download/models-v1.0.0/fixture.zip',
+      expect.objectContaining({ credentials: 'omit' }));
+    expect(await readFile(path.join(componentLocation(f.root, f.pkg), 'files/speech/model.onnx'))).toEqual(f.data);
+  });
   it('stops reading a valid model partway through verification and can recheck it', async () => {
     const f = await fixture();
     await f.service().download();

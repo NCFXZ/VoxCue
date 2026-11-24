@@ -1,6 +1,6 @@
 import { captureRequested } from '../../../shared/test/scripts/capture-requested.mjs';
 import { checkHiddenDivider, checkProgressMotion } from '../../../shared/test/scripts/check-progress-motion.mjs';
-import { connectUiAccount } from '../../../shared/test/scripts/install-ui-account.mjs';
+import { connectUiAccount, showInterviewWindow } from '../../../shared/test/scripts/install-ui-account.mjs';
 import { testRoot, electron } from '../../../shared/test/scripts/test-workspace.mjs';
 import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -171,8 +171,8 @@ try {
   main.on('pageerror', (error) => errors.push(error.message));
   await main.getByRole('textbox', { name: '聊天消息', exact: true }).fill('普通问题');
   await main.getByRole('button', { name: '发送消息', exact: true }).click();
-  // A fresh request must use the modern thinking label before any public steps.
-  await main.locator('.chat-activity').getByText('正在思考', { exact: true }).waitFor();
+  // Waiting for the provider must remain distinct from actual thinking.
+  await main.locator('.chat-activity').getByText('正在等待模型响应', { exact: true }).waitFor();
   assert.equal(await main.locator('.activity-dot').count(), 0);
   assert.equal(await main.getByText(/正在查询网页/).count(), 0);
   await app.evaluate(() => globalThis.layoutThought());
@@ -400,7 +400,7 @@ try {
       (theme) => document.documentElement.classList.toggle('dark', theme === 'dark'),
       theme,
     );
-    await floating.getByRole('button', { name: '关闭截图保护', exact: true }).click();
+    await showInterviewWindow(floating);
     const notice = floating.getByText('此窗口未隐藏', { exact: true });
     await notice.waitFor();
     assert.deepEqual(await panelBoxes(), initial, 'A notice cannot move or resize either panel');
@@ -903,10 +903,10 @@ try {
   checks.push(
     'answer-only resize, collapse/settings/expand and transcript preserve panel geometry and every painted toolbar anchor inside the fixed native canvas',
   );
-  await floating.getByRole('button', { name: '关闭截图保护', exact: true }).click();
+  await showInterviewWindow(floating);
   await floating.getByRole('textbox', { name: '面试提问', exact: true }).fill('面试普通问题');
   await floating.getByRole('button', { name: '发送面试问题', exact: true }).click();
-  await floating.locator('.chat-activity').getByText('正在思考', { exact: true }).waitFor();
+  await floating.locator('.chat-activity').getByText('正在等待模型响应', { exact: true }).waitFor();
   assert.equal(await floating.locator('.activity-dot').count(), 0);
   await app.evaluate(() => globalThis.layoutThought());
   await floating.locator('.reasoning-section summary').filter({ hasText: '分析问题' }).waitFor();

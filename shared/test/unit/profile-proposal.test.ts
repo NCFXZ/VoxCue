@@ -2,6 +2,7 @@ import { codexAccess } from '../fixtures/codex-access';
 import { describe, expect, it, vi } from 'vitest';
 import {
   ProfileAnswerStream,
+  ProfileOutputError,
   profileInstructions,
 } from '../../../shared/electron/backend/chat/profile';
 import { ChatGPTService } from '../../../shared/electron/backend/chat/service';
@@ -247,8 +248,119 @@ describe('资料提案协议', () => {
     const visible = [...json].map((char) => stream.append(char)).join('');
     const result = stream.finish(base);
     expect(visible + result.delta).toBe(answer);
+    expect(result.answerText).toBe(answer);
     expect(result.changes).toEqual({ name: '新姓名', jobDescription: '新的 JD' });
     expect(base.name).toBe('旧姓名');
+  });
+  it('OpenAI API 接受单个 JSON 代码块，原有账号解析仍要求 JSON', () => {
+    const wire = ' \r\n```JSON\r\n' + JSON.stringify({ answer, changes: { jobDescription: '' } }) + '\r\n```\n';
+    const openai = new ProfileAnswerStream(true);
+    expect(openai.append(wire)).toBe('');
+    expect(openai.previewReady).toBe(false);
+    expect(openai.preview()).toBeUndefined();
+    expect(openai.finish(base)).toEqual({ answerText: answer, delta: answer, changes: { jobDescription: '' }, skillScope: null });
+    expect(base.jobDescription).toBe('现有 JD');
+
+    const account = new ProfileAnswerStream();
+    account.append(wire);
+    expect(() => account.finish(base)).toThrow('资料更新提案不完整');
+    expect(() => account.finish(base)).not.toThrow(ProfileOutputError);
+  });
+
+  it.each([
+    ['正文前缀', '请确认\n```json\n{"answer":"正文","changes":{}}\n```', '资料更新提案不完整'],
+    ['正文后缀', '```json\n{"answer":"正文","changes":{}}\n```\n请确认', '资料更新提案不完整'],
+    ['缺少闭合', '```json\n{"answer":"正文","changes":{}}', '资料更新提案不完整'],
+    ['非 JSON 代码块', '```javascript\n{"answer":"正文","changes":{}}\n```', '资料更新提案不完整'],
+    ['错误结构', '```json\n[{"answer":"正文","changes":{}}]\n```', '资料更新格式无效'],
+    ['错误字段类型', '```json\n{"answer":"正文","changes":{"jobDescription":3}}\n```', '资料更新内容无效或过长'],
+    ['未知字段', '{"answer":"正文","changes":{"admin":"无效"}}', '资料更新包含未知字段'],
+  ])('API 容错拒绝不合规的提案（%s）', (_label, wire, message) => {
+    const stream = new ProfileAnswerStream(true);
+    stream.append(wire);
+    expect(() => stream.finish(base)).toThrow(ProfileOutputError);
+    expect(() => stream.finish(base)).toThrow(message);
+    expect(base.jobDescription).toBe('现有 JD');
+  });
+  it('API 把错误转义留到结束时报告，历史流式行为保持一致', () => {
+    const first = '{"answer":"已收到';
+    const rest = '\\q","changes":{"name":"错误提案"}}';
+    const api = new ProfileAnswerStream(true);
+    expect(api.append(first)).toBe('已收到');
+    expect(api.append(rest)).toBe('');
+    expect(api.preview()).toBeUndefined();
+    expect(() => api.finish(base)).toThrow(ProfileOutputError);
+    expect(() => api.finish(base)).toThrow('资料回答格式无效。');
+
+    const account = new ProfileAnswerStream();
+    expect(account.append(first)).toBe('已收到');
+    expect(() => account.append(rest)).toThrow('资料回答格式无效。');
+  });
+  it('把误放进 changes 的 skillScope 和来源清单移回原位，其他未知字段按名称拒绝', () => {
+    const skills = [{ id: 'signals', title: '信号完整性', content: '阻抗匹配与端接。', sources: [] }];
+    const summaries = { ...base, background: '已确认简历', jobDescription: '已确认 JD' };
+    const source = { title: '合成来源', url: 'https://example.com/source' };
+    const parse = (value: object, recoverable = false) => {
+      const stream = new ProfileAnswerStream(recoverable);
+      stream.append(JSON.stringify({ answer: '已生成技能。', ...value }));
+      return stream;
+    };
+    for (const recoverable of [false, true]) {
+      const nested = parse({ changes: { skills, skillScope: 'all', sources: [source] } }, recoverable);
+      expect(nested.preview()?.skills).toHaveLength(1);
+      expect(nested.finish(summaries)).toEqual({
+        answerText: '已生成技能。', delta: '', changes: { skills }, skillScope: 'all',
+      });
+      expect(parse({ changes: { skills, skillScope: 'topic' }, skillScope: null }, recoverable).finish(summaries))
+        .toMatchObject({ skillScope: 'topic' });
+      expect(parse({ changes: { skills, skillScope: null }, skillScope: 'all' }, recoverable).finish(summaries))
+        .toMatchObject({ skillScope: 'all' });
+    }
+    expect(() => parse({ changes: { skills, skillScope: 'topic' }, skillScope: 'all' }).finish(summaries))
+      .toThrow('资料更新中的技能范围前后不一致，未修改个人信息。');
+    expect(() => parse({ changes: { skills, skillScope: 'everything' } }).finish(summaries))
+      .toThrow('资料更新格式无效，未修改个人信息。');
+    expect(() => parse({ changes: { targetRole: '硬件工程师' } }).finish(summaries))
+      .toThrow('资料更新包含未知字段：targetRole。');
+    expect(() => parse({ changes: { skills, sources: 'https://example.com' } }).finish(summaries))
+      .toThrow('资料更新包含未知字段：sources。');
+    expect(() => parse({ changes: { role: '旧岗位字段' } }, true).finish(summaries)).toThrow(ProfileOutputError);
+    expect(summaries.jobDescription).toBe('已确认 JD');
+  });
+  it('修正技能条目中不改变含义的格式偏差，其余问题按技能说明原因', () => {
+    const existing = { id: 'kept', title: '已有技能', content: '旧正文', sources: [] };
+    const summaries = { ...base, background: '已确认简历', jobDescription: '已确认 JD', skills: [existing] };
+    const finish = (skills: unknown[]) => {
+      const stream = new ProfileAnswerStream();
+      stream.append(JSON.stringify({ answer: '已整理技能。', changes: { skills }, skillScope: 'all' }));
+      return stream.finish(summaries);
+    };
+    const source = { title: '合成文档', url: 'https://example.com/doc', snippet: '额外字段' };
+    expect(finish([
+      { id: '机器人闭环控制', title: '机器人闭环控制', content: '正文一' },
+      { id: 'robot.board level', title: '板级系统设计', content: '正文二', sources: null },
+      { id: 'skill-1', title: '已有编号', content: '正文三', sources: [source, { title: '无地址' }, 'https://example.com/x'] },
+      { title: '已有技能', content: '改写后的正文', sources: [] },
+    ]).changes.skills).toEqual([
+      { id: 'skill-2', title: '机器人闭环控制', content: '正文一', sources: [] },
+      { id: 'skill-3', title: '板级系统设计', content: '正文二', sources: [] },
+      { id: 'skill-1', title: '已有编号', content: '正文三', sources: [{ title: '合成文档', url: 'https://example.com/doc' }] },
+      { id: 'kept', title: '已有技能', content: '改写后的正文', sources: [] },
+    ]);
+    const skill = { id: 'one', title: '合成技能', content: '正文', sources: [] };
+    expect(() => finish([{ ...skill, level: '核心' }])).toThrow('技能「合成技能」包含未知字段：level，未修改个人信息。');
+    expect(() => finish([{ ...skill, title: '长'.repeat(81) }])).toThrow('的标题为空或超过 80 个字符');
+    expect(() => finish([{ ...skill, content: ' ' }])).toThrow('技能「合成技能」的正文为空或超过 6000 个字符，未修改个人信息。');
+    expect(() => finish([skill, { ...skill, title: '另一项' }])).toThrow('技能 id 重复：one，未修改个人信息。');
+    expect(() => finish(Array.from({ length: 11 }, (_, index) => ({ ...skill, id: 'n' + index }))))
+      .toThrow('技能最多 10 项，本次提案有 11 项，未修改个人信息。');
+    expect(() => finish(['不是对象'])).toThrow('技能「#1」格式无效，未修改个人信息。');
+    expect(summaries.skills).toEqual([existing]);
+  });
+  it('API 容错保留没有资料变更的完整答案', () => {
+    const stream = new ProfileAnswerStream(true);
+    expect(stream.append('{"answer":"你好","changes":{}}')).toBe('你好');
+    expect(stream.finish(base)).toEqual({ answerText: '你好', delta: '', changes: {}, skillScope: null });
   });
   it('拒绝未知、纯空白和过长字段，显式空字符串表示删除；过滤未变化字段，不接受不完整提案', () => {
     expect(() => validateChanges({ admin: 'yes' })).toThrow('未知字段');

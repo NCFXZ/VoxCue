@@ -2,17 +2,22 @@ import { useLayoutEffect, useRef, useState, type ReactElement } from 'react';
 import { useHeightTransition } from './useHeightTransition';
 import './content-reveal.css';
 
-function ResizingContent({ children, resizeKey }: { children: ReactElement; resizeKey: string }) {
+function ResizingContent({ children, resizeKey, resizeChild }: {
+  children: ReactElement; resizeKey: string; resizeChild?: boolean;
+}) {
   const content = useRef<HTMLDivElement>(null);
-  useHeightTransition(resizeKey, () => [content.current]);
+  useHeightTransition(resizeKey, () => [
+    resizeChild ? content.current?.firstElementChild as HTMLElement | null : content.current,
+  ]);
   return <div ref={content} className="reveal-content">{children}</div>;
 }
 
 /** Keep the last contents inert until their space and opacity finish transitioning. */
-export function ContentReveal({ children, className, resizeKey }: {
+export function ContentReveal({ children, className, resizeKey, resizeChild }: {
   children: ReactElement | null | undefined | false | '';
   className?: string;
   resizeKey?: string;
+  resizeChild?: boolean;
 }) {
   const frame = useRef<HTMLDivElement>(null);
   const [retained, setRetained] = useState(children);
@@ -38,7 +43,7 @@ export function ContentReveal({ children, className, resizeKey }: {
       aria-hidden={!open || undefined}
     >
       <div className="interview-reveal-clip">
-        {resizeKey === undefined ? content : <ResizingContent resizeKey={resizeKey}>{content}</ResizingContent>}
+        {resizeKey === undefined ? content : <ResizingContent resizeKey={resizeKey} resizeChild={resizeChild}>{content}</ResizingContent>}
       </div>
     </div>
   );

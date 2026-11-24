@@ -6,6 +6,11 @@ export interface AuthUser {
   email: string;
 }
 export type AccountService = 'chatgpt' | 'copilot';
+export interface AccountConnection {
+  service: AccountService;
+  name: string;
+  email: string;
+}
 export type AIService = AccountService | ApiProvider;
 export type ProviderCredentialReason = 'denied' | 'unavailable';
 export const providerCredentialStatus: Record<AccountService, string> = {

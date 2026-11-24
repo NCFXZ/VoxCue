@@ -4,16 +4,17 @@ import { useEffect, useRef, useState } from 'react';
 import { usePreparation } from '../stores/preparation';
 import { Modal } from './ui/modal';
 import {
-  MessageCirclePlus,
+  CommentEdit,
   History,
   Database,
   Settings,
-  LogOut,
   PanelLeftClose,
   PanelLeftOpen,
   Refresh,
   X,
 } from './icons';
+import { LogOut } from './LogoutIcon';
+import { LogIn } from './LoginIcon';
 import { Button } from './ui/button';
 import { ConfirmDeleteButton } from './ui/confirm-delete-button';
 import { AppLogo } from './AppLogo';
@@ -110,7 +111,7 @@ export function Sidebar({
           onClick={onNew}
           disabled={!preparation.chatsReady}
         >
-          <MessageCirclePlus size={18} />
+          <CommentEdit size={18} />
           <span>{t('新对话')}</span>
           <span className="nav-create-symbol" aria-hidden="true">
             ＋
@@ -219,7 +220,7 @@ export function Sidebar({
               </DropdownMenu.Item>
               <DropdownMenu.Separator className="dropdown-separator" />
               <DropdownMenu.Item className="dropdown-item" onSelect={() => setLoggingOut(true)}>
-                <LogOut size={16} />
+                {localMode ? <LogIn size={16} /> : <LogOut size={16} />}
                 {localMode ? t('返回登录') : t('退出登录')}
               </DropdownMenu.Item>
             </DropdownMenu.Content>
@@ -249,7 +250,7 @@ export function Sidebar({
                 onLogout();
               }}
             >
-              <LogOut size={16} />
+              {localMode ? <LogIn size={16} /> : <LogOut size={16} />}
               {localMode ? t('返回登录') : t('退出登录')}
             </Button>
           </div>

@@ -4,7 +4,8 @@ import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import type { CloudAccountCall } from '../../electron/contracts/cloudAccount';
 import { Button } from './ui/button';
 import { useCloudAccount } from '../stores/cloudAccount';
-import { Person, LogOut } from './icons';
+import { LogIn } from './icons';
+import { LogOut } from './LogoutIcon';
 import { VerificationCodeInput } from './VerificationCodeInput';
 import { PasswordInput } from './ui/password-input';
 import './cloudAccountPanel.css';
@@ -292,7 +293,7 @@ export function CloudAccountPanel({
             disabled={busy}
             onClick={() => void changeLocalMode(false)}
           >
-            <Person size={16} />
+            <LogIn size={16} />
             {t('登录')}
           </Button>
         </div>
@@ -440,6 +441,7 @@ export function CloudAccountPanel({
               type="submit"
               disabled={blocked || (mode !== 'login' && !challenge) || (mode === 'register' && !acceptedAgreement)}
             >
+              {!entry && mode === 'login' && <LogIn size={16} />}
               {busy
                 ? t('处理中…')
                 : mode === 'login'

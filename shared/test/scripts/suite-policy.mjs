@@ -8,6 +8,8 @@ const modelFree = new Set([
   'account-usage-overview',
   'language',
   'shortcut-settings',
+  'settings-location',
+  'announcement-ui',
   'interview-badge-layout',
   'interview-shortcuts',
   'mobile-bundle',

@@ -36,6 +36,15 @@ export function actionLabel(activity: Activity, active: boolean) {
   return stopped ? `${t(noun)} · ${t(stopped)}` : t(`${done ? '已' : '正在'}${noun}`);
 }
 
+function pagePattern(activity: Activity) {
+  if (activity.kind !== 'find_in_page' || !activity.url || !activity.detail) return;
+  try {
+    const url = new URL(activity.url);
+    // Older activities used detail for the page address, which the source capsule already represents.
+    if (activity.detail !== `${url.hostname}${url.pathname}`.slice(0, 512)) return activity.detail;
+  } catch { /* Invalid metadata must not break the activity list. */ }
+}
+
 function ReasoningBlocks({ text, active }: { text: string; active: boolean }) {
   const sections = reasoningSections(text);
   return sections.map((section, index) =>
@@ -90,17 +99,22 @@ export function ResponseProgress({ message, children }: { message: ProgressMessa
     active && message.startedAt !== undefined
       ? Math.max(0, now - message.startedAt)
       : message.durationMs;
+  const activities = message.activities ?? [];
+  const endedWithoutAnswer = !answering && (message.status === 'failed' || message.status === 'stopped');
+  const entries = activities.filter(entry => entry.kind !== 'status' ||
+    ((active || entry.status === 'completed') && !(endedWithoutAnswer && entry.phase === 'writing')));
+  const lastState = entries.map((entry) => entry.kind).lastIndexOf('status');
+  const lastReasoning = entries.map((entry) => entry.kind).lastIndexOf('reasoning');
+  const currentActivity = entries[lastState] ?? message.activity;
+  const phase = currentActivity?.phase;
+  const thinking = phase === 'thinking' && currentActivity?.kind !== 'knowledge';
+  const elapsedLabel = answering ? '用时' : active ? (thinking ? '正在思考' : '用时') : '已处理';
   const elapsed =
     duration !== undefined && Number.isFinite(duration)
-      ? `${t(answering ? '用时' : active ? '正在思考' : '已处理')} ${formatDuration(duration)}`
+      ? `${t(elapsedLabel)} ${formatDuration(duration)}`
       : message.reasoningSummary?.trim()
         ? '推理摘要'
         : null;
-  const entries = message.activities ?? [];
-  const timeline = entries.some((entry) => entry.kind === 'status' || entry.kind === 'reasoning');
-  const lastState = entries.map((entry) => entry.kind).lastIndexOf('status');
-  const lastReasoning = entries.map((entry) => entry.kind).lastIndexOf('reasoning');
-  const thinking = (entries[lastState] ?? message.activity)?.phase === 'thinking';
   const collapsible = answering && (!!entries.length || !!message.reasoningSummary?.trim());
   const visible = !collapsible || expanded;
   if (!elapsed && !active && !entries.length && !message.reasoningSummary?.trim()) return null;
@@ -133,8 +147,10 @@ export function ResponseProgress({ message, children }: { message: ProgressMessa
         aria-hidden={!visible}
         inert={!visible}
       >
-        {!timeline && active && (
-          children === undefined ? <ChatActivity activity={message.activity} mock={message.mode !== 'live'} /> : children
+        {!entries.length && active && (
+          children === undefined ? (
+            <ChatActivity activity={message.activity} mock={message.mode !== 'live'} />
+          ) : children
         )}
         {!entries.some((entry) => entry.kind === 'reasoning') &&
           message.reasoningSummary?.trim() && (
@@ -187,7 +203,10 @@ export function ResponseProgress({ message, children }: { message: ProgressMessa
                     ) : (
                       <>
                         <span>{actionLabel(activity, active)}</span>
-                        {activity.detail &&
+                        {pagePattern(activity) && (
+                          <span className="progress-detail">{pagePattern(activity)}</span>
+                        )}
+                        {activity.detail && !(activity.kind === 'knowledge' && activity.detail === '检索本地资料') &&
                           (activity.url ? (
                             <span className="progress-link">
                               <SourceLink

@@ -9,6 +9,7 @@ import { useAuth } from '../stores/auth';
 import { openChatLink } from '../services/chat';
 import { Button } from './ui/button';
 import { Refresh } from './icons';
+import type { AccountService } from '../../electron/contracts/auth';
 
 const planNames: Partial<Record<AccountUsage['plan'], string>> = {
   free: 'Copilot Free',
@@ -55,12 +56,10 @@ function SkeletonLine({ className = '' }: { className?: string }) {
 function Quota({
   value,
   loading = false,
-  percentage = false,
   now,
 }: {
   value?: AccountQuota;
   loading?: boolean;
-  percentage?: boolean;
   now: number;
 }) {
   const state =
@@ -75,21 +74,17 @@ function Quota({
           : value?.advisory
             ? '服务返回的参考余额'
             : null;
-  const reset = value ? value.resetAt !== null : percentage;
-  const metrics: { label: string; amount: number | null }[] = reset
-    ? []
-    : value
-      ? [
-          ...(value.used !== null && value.unit !== 'percent'
-            ? [{ label: '已用', amount: value.used }]
-            : []),
-          ...(value.remaining !== null && value.remainingPercent !== null
-            ? [{ label: '剩余', amount: value.remaining }]
-            : []),
-        ]
-      : percentage
-        ? []
-        : ['已用', '剩余'].map((label) => ({ label, amount: null }));
+  const reset = !value || value.resetAt !== null;
+  const metrics: { label: string; amount: number | null }[] = !reset && value
+    ? [
+        ...(value.used !== null && value.unit !== 'percent'
+          ? [{ label: '已用', amount: value.used }]
+          : []),
+        ...(value.remaining !== null && value.remainingPercent !== null
+          ? [{ label: '剩余', amount: value.remaining }]
+          : []),
+      ]
+    : [];
   const progress = !value || value.remainingPercent !== null;
   return (
     <article
@@ -175,106 +170,105 @@ function Quota({
 }
 function QuotaSkeleton({
   usage,
-  percentage,
   now,
 }: {
   usage: AccountUsage | null;
-  percentage: boolean;
   now: number;
 }) {
-  const quotas =
+  const count =
     usage?.status === 'available' && usage.quotas.length
-      ? orderedAccountQuotas(usage.quotas)
-      : [undefined];
+      ? usage.quotas.length
+      : 1;
   return (
     <div role="status" aria-label={t('正在读取账户额度')}>
       <span className="sr-only">{t('正在读取账户额度…')}</span>
       <div className="account-quota-list" aria-hidden="true">
-        {quotas.map((value, index) => (
-          <Quota key={index} value={value} loading percentage={percentage} now={now} />
+        {Array.from({ length: count }, (_, index) => (
+          <Quota key={index} loading now={now} />
         ))}
       </div>
     </div>
   );
 }
-export function UsagePanel() {
+export function UsagePanel({ service }: { service?: AccountService } = {}) {
   const state = useChatConnection();
   const [now, setNow] = useState(Date.now);
   const session = useAuth((value) => value.session);
-  const copilot = session?.mode === 'copilot';
-  const live = session?.mode === 'chatgpt' || copilot;
-  const usage = state.usage?.provider === session?.mode ? state.usage : null;
+  const account = service ?? (session?.mode === 'chatgpt' || session?.mode === 'copilot' ? session.mode : undefined);
+  const copilot = account === 'copilot';
+  const live = !!account;
+  const details = service && service !== session?.mode
+    ? state.savedUsage[service] ?? { usage: null, usageError: null, loadingUsage: false } : state;
+  const usage = details.usage?.provider === account ? details.usage : null;
+  const refreshUsage = () => service && service !== session?.mode
+    ? state.refreshSavedUsage(service) : state.refreshUsage();
   const unavailable = copilot
     ? t('账户额度暂不可用，请刷新或查看 GitHub 官方用量。')
     : t('ChatGPT 账户额度暂不可用，请刷新或查看官方用量。');
-  const error = state.usageError && t(state.usageError);
+  const error = details.usageError && t(details.usageError);
   const available = usage?.status === 'available' && usage.quotas.length > 0;
   const quotaBody = useRef<HTMLDivElement>(null);
   const quotaView = !live ? 'disconnected'
-    : state.loadingUsage ? 'loading'
+    : details.loadingUsage ? 'loading'
     : available ? 'available'
     : error === unavailable ? 'empty'
     : 'unavailable';
   useHeightTransition(quotaView, () => [quotaBody.current]);
   useEffect(() => {
     setNow(Date.now());
-    if (state.loadingUsage || !usage?.quotas.some((quota) => quota.resetAt !== null)) return;
+    if (details.loadingUsage || !usage?.quotas.some((quota) => quota.resetAt !== null)) return;
     const timer = window.setInterval(() => setNow(Date.now()), 60_000);
     return () => window.clearInterval(timer);
-  }, [usage, state.loadingUsage]);
+  }, [usage, details.loadingUsage]);
   const usageUrl = copilot
     ? 'https://github.com/settings/copilot'
     : 'https://chatgpt.com/settings/usage';
   useEffect(() => {
-    if (live) void state.refreshUsage();
-  }, [session?.mode, session?.user.id]);
+    if (!service && live) void state.refreshUsage();
+  }, [service, session?.mode, session?.user.id]);
   return (
     <section
       className="usage-panel settings-usage"
       aria-label={t('账户额度')}
-      aria-busy={live && state.loadingUsage}
+      aria-busy={live && details.loadingUsage}
     >
-      <header>
-        <div className="account-quota-heading">
-          <strong>{t('账户额度')}</strong>
-          {live &&
-            (state.loadingUsage ? (
-              <span className="quota-skeleton-line quota-skeleton-plan" aria-hidden="true" />
-            ) : (
-              usage && (
-                <span className="account-quota-plan">
-                  {t(
-                    (copilot ? planNames : chatGPTPlans)[usage.plan] ??
-                      (copilot ? 'GitHub Copilot' : 'ChatGPT'),
-                  )}
-                </span>
-              )
-            ))}
-        </div>
-        {live && (
-          <Button
-            variant="ghost"
-            disabled={state.loadingUsage}
-            onClick={() => void state.refreshUsage()}
-            aria-label={t('刷新账户额度')}
-          >
-            <Refresh size={16} />
-            {state.loadingUsage ? t('刷新中…') : t('刷新')}
-          </Button>
-        )}
-      </header>
-      <div ref={quotaBody} className="quota-body">
-        {quotaView === 'disconnected' ? (
-          <p>{t('连接模型服务后可查看账户用量。')}</p>
-        ) : quotaView === 'loading' ? (
-          <QuotaSkeleton usage={usage} percentage={!copilot} now={now} />
-        ) : available ? (
-          <div className="account-quota-list">
-            {orderedAccountQuotas(usage.quotas).map((quota, index) => (
-              <Quota key={`${quota.id}-${index}`} value={quota} now={now} />
-            ))}
+      <div className="account-usage-card">
+        <header>
+          <div className="account-quota-heading">
+            <strong>
+              {live
+                ? details.loadingUsage
+                  ? <span className="quota-skeleton-line quota-skeleton-plan" aria-hidden="true" />
+                  : t('{0}额度', [t((copilot ? planNames : chatGPTPlans)[usage?.plan ?? 'unknown'] ??
+                    (copilot ? 'GitHub Copilot' : 'ChatGPT'))])
+                : t('账户额度')}
+            </strong>
           </div>
-        ) : quotaView === 'unavailable' ? <p>{unavailable}</p> : null}
+          {live && (
+            <Button
+              variant="ghost"
+              disabled={details.loadingUsage}
+              onClick={() => void refreshUsage()}
+              aria-label={t('刷新账户额度')}
+            >
+              <Refresh size={16} />
+              {details.loadingUsage ? t('刷新中…') : t('刷新')}
+            </Button>
+          )}
+        </header>
+        <div ref={quotaBody} className="quota-body">
+          {quotaView === 'disconnected' ? (
+            <p>{t('连接模型服务后可查看账户用量。')}</p>
+          ) : quotaView === 'loading' ? (
+            <QuotaSkeleton usage={usage} now={now} />
+          ) : available ? (
+            <div className="account-quota-list">
+              {orderedAccountQuotas(usage.quotas).map((quota, index) => (
+                <Quota key={`${quota.id}-${index}`} value={quota} now={now} />
+              ))}
+            </div>
+          ) : quotaView === 'unavailable' ? <p>{unavailable}</p> : null}
+        </div>
       </div>
       {live && (
         <footer className="usage-footer">

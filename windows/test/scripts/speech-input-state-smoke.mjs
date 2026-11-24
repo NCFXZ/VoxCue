@@ -54,7 +54,7 @@ for(const wave of Object.values(waves))if(wave.sampleRate!==16000||!wave.samples
 const stats={created:{microphone:0,system:0},started:{microphone:0,system:0},stopped:{microphone:0,system:0},packets:{microphone:0,system:0}};
 const captures=new Map();let controller,offset=0,playback,playSequence=0;
 const total=Math.max(...Object.values(waves).map(wave=>wave.samples.length))+32000;
-const clock=()=>1000000+offset/16;
+const clock=()=>Number(process.hrtime.bigint())/1e6;
 const snapshot=()=>({
  ...structuredClone(stats),pid:process.pid,worker:controller?.worker?.threadId,
  queued:controller?.pendingAudio.size??0,playback:playback?{id:playback.id,done:playback.offset>=total,startMs:playback.startMs}:null,
@@ -68,6 +68,7 @@ const timer=setInterval(()=>{
  offset+=1600;if(playback)playback.offset+=1600;
 },100);
 const adapter={
+ captureClockNow:clock,
  drainBeforeRetire:true,
  preprocessorFile:path.join(config.root,'dist-electron/windows/electron/speech/echoCancellation.js'),
  devices:async()=>sources.map(source=>({id:source,name:'Verified public fixture',source,default:true})),
@@ -86,8 +87,8 @@ port.on('message',async({data:message})=>{
   if(message.init)controller=new SpeechController(message.model,'synthetic',event=>port.postMessage({event}),adapter);
   else if(message.test==='stats')value=snapshot();
   else if(message.test==='play'){
-   const anchor=controller.anchors.get('microphone');
-   playback={id:++playSequence,offset:0,startMs:anchor?anchor.wall+clock()-anchor.native:Date.now()};value=snapshot();
+   // Use the capture clock port; the old private anchor map no longer exists.
+   playback={id:++playSequence,offset:0,startMs:Date.now()};value=snapshot();
   }else if(message.close){clearInterval(timer);await controller.close();value=snapshot();}
   else value=await controller.call(message.call);
   port.postMessage({id:message.id,value});

@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import { writeFile } from 'node:fs/promises';
 import workspace from '../../scripts/workspace.mjs';
+import apiPreview from '../fixtures/api-interactive-preview.cjs';
 import { testRoot, electron } from './test-workspace.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
 import { captureRequested } from './capture-requested.mjs';
@@ -70,6 +71,121 @@ async function runPreview() {
     await settings.getByRole('navigation', { name: '设置分类' })
       .getByRole('button', { name: 'AI 服务', exact: true }).click();
   }
+  async function enableDeepSeek() {
+    await openSettings();
+    await settings.getByRole('radio', { name: 'API 密钥', exact: true }).click();
+    const row = settings.getByRole('group', { name: 'DeepSeek', exact: true });
+    await row.waitFor();
+    const enable = row.getByRole('button', { name: '启用', exact: true });
+    if (await enable.isVisible()) await enable.click();
+    await row.getByRole('button', { name: '禁用', exact: true }).waitFor();
+    await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
+  }
+  async function chooseModel(name) {
+    const menu = await openModelMenu(page);
+    assert.equal(await menu.getByText('OpenAI API', { exact: true }).count(), 0, 'API menus omit the provider heading');
+    assert.equal(await menu.getByText('DeepSeek', { exact: true }).count(), 0, 'API menus omit the provider heading');
+    await menu.getByRole('menuitem', { name: '刷新模型列表', exact: true }).waitFor();
+    await menu.getByRole('menuitemradio', { name, exact: true }).click();
+    // Choosing a model leaves its effort popup open; close it before using the composer.
+    await page.keyboard.press('Escape');
+    await page.getByRole('menu', { name: '思考强度', exact: true }).waitFor({ state: 'hidden' });
+  }
+  async function checkProfileStream() {
+    const { request, prefix, suffix } = apiPreview.profilePreview;
+    await enableDeepSeek();
+    await chooseModel('DeepSeek-V4-Pro');
+
+    const readSavedBackground = () =>
+      page.evaluate(() => JSON.parse(localStorage.getItem('copilot-personal-info-v1'))?.background);
+    const before = await readSavedBackground();
+    await page.getByRole('textbox', { name: '聊天消息', exact: true }).fill(request);
+    await page.getByRole('button', { name: '发送消息', exact: true }).click();
+    const streaming = page.getByRole('region', { name: '正在生成的资料提案', exact: true });
+    await streaming.getByText(prefix, { exact: true }).waitFor();
+    assert.ok(await streaming.getByRole('button', { name: '保存所选', exact: true }).isDisabled());
+    await streaming.getByRole('button', { name: '查看简历摘要', exact: true }).click();
+    const reader = page.getByRole('dialog', { name: '简历摘要', exact: true });
+    await reader.getByText(prefix, { exact: true }).waitFor();
+    assert.equal(await reader.getByRole('checkbox').count(), 0, 'Streaming reader is read-only');
+    assert.equal(await readSavedBackground(), before);
+
+    await app.evaluate(() => globalThis.finishApiProfilePreview());
+    await reader.getByText(prefix + suffix, { exact: true }).waitFor();
+    await reader.getByRole('button', { name: '关闭对话框', exact: true }).click();
+    const complete = page.getByRole('region', { name: '待确认的资料更新', exact: true });
+    const save = complete.getByRole('button', { name: '保存所选', exact: true });
+    assert.equal(await readSavedBackground(), before, 'Completing the stream cannot save the draft');
+    await save.click();
+    await complete.getByText('已保存所选资料', { exact: true }).waitFor();
+    assert.equal(await readSavedBackground(), prefix + suffix);
+    console.log('DeepSeek structured streaming, read-only preview and explicit save passed.');
+  }
+  if (process.argv.includes('--profile-stream')) return checkProfileStream();
+  async function checkDeepSeekPreparation() {
+    const { answer, unlabeled } = apiPreview.deepSeekPreparation;
+    await enableDeepSeek();
+    const log = page.getByLabel('聊天内容', { exact: true });
+    const cards = log.getByRole('region', { name: '待确认的资料更新', exact: true });
+    const sendButton = page.getByRole('button', { name: '发送消息', exact: true });
+    const readSavedRole = () =>
+      page.evaluate(() => JSON.parse(localStorage.getItem('copilot-personal-info-v1'))?.jobDescription);
+    const send = async (text) => {
+      await page.getByRole('textbox', { name: '聊天消息', exact: true }).fill(text);
+      await sendButton.click();
+    };
+    for (const [name, roles] of [
+      ['DeepSeek-V4.1-Flash', ['软件工程师', '硬件工程师']],
+      ['DeepSeek-V4-Pro', ['测试工程师', '嵌入式工程师']],
+    ]) {
+      await page.getByRole('button', { name: '新对话', exact: true }).click();
+      await chooseModel(name);
+
+      // The server holds the rest of this answer until released below.
+      await send(answer.request);
+      await log.getByText(answer.first).waitFor();
+      assert.equal(await log.getByText(answer.rest).count(), 0, `${name}: later text is still on the server`);
+      assert.ok(await page.getByRole('button', { name: '停止回复', exact: true }).isVisible(), `${name}: still streaming`);
+      await app.evaluate(() => globalThis.finishApiAnswerStream());
+      await log.getByText(answer.first + answer.rest).waitFor();
+      await sendButton.waitFor();
+      assert.equal(await cards.count(), 0, `${name}: an ordinary answer has no proposal`);
+
+      // A searched answer without the intent line stays visible; only its structure is asked again.
+      const followUps = await app.evaluate(() => globalThis.apiStructureFollowUps ?? 0);
+      await send(unlabeled.request);
+      await log.getByText(unlabeled.answer).waitFor();
+      await sendButton.waitFor();
+      assert.equal(await app.evaluate(() => globalThis.apiStructureFollowUps ?? 0), followUps + 1,
+        `${name}: a missing intent line asks only for the structure`);
+      assert.equal(await log.getByText('没有标明本轮是否修改资料').count(), 0, `${name}: no error is shown`);
+      assert.equal(await cards.count(), 0, `${name}: the follow-up proposed no change`);
+
+      const before = await readSavedRole();
+      await send(`把目标岗位改成${roles[0]}`);
+      await cards.nth(0).getByText(roles[0]).first().waitFor();
+      await sendButton.waitFor();
+      await send(`不对，改成${roles[1]}`);
+      await cards.nth(0).getByText('已保留原资料', { exact: true }).waitFor();
+      assert.equal(await cards.nth(0).getByRole('button', { name: '保存所选', exact: true }).count(), 0,
+        `${name}: sending a new message dismisses the previous proposal`);
+      await cards.nth(1).getByText(roles[1]).first().waitFor();
+      await sendButton.waitFor();
+      assert.equal(await cards.count(), 2, `${name}: the newer request has its own proposal`);
+      assert.equal(await readSavedRole(), before, `${name}: proposals do not save the profile`);
+      await cards.nth(1).getByRole('button', { name: '保存所选', exact: true }).click();
+      await cards.nth(1).getByText('已保存所选资料', { exact: true }).waitFor();
+      assert.equal(await readSavedRole(), roles[1]);
+    }
+    await openSettings();
+    const openai = settings.getByRole('group', { name: 'OpenAI API', exact: true });
+    await openai.getByRole('button', { name: '启用', exact: true }).click();
+    await openai.getByRole('button', { name: '禁用', exact: true }).waitFor();
+    await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
+    await chooseModel('gpt-6.2-sol');
+    console.log('DeepSeek Flash and V4 Pro incremental answers, structure follow-up, automatic retention of older proposals and API menus without provider headings passed.');
+  }
+  if (process.argv.includes('--deepseek-preparation')) return checkDeepSeekPreparation();
   async function checkProviderLogos() {
     const button = (scope, name) => scope.getByRole('button', { name, exact: true });
     const icons = new Map();
@@ -180,15 +296,15 @@ async function runPreview() {
     console.log('OpenAI and DeepSeek settings, chat, interview and retained answer logos passed.');
   }
   if (process.argv.includes('--provider-logos')) return checkProviderLogos();
-  async function checkInterviewBilling(expected, screenshotName) {
+  async function checkInterviewBilling(service, expected, screenshotName) {
     await page.getByRole('button', { name: '开始面试', exact: true }).click();
     const dialog = page.getByRole('dialog', { name: '开始面试', exact: true });
     const summary = dialog.getByRole('group', { name: '当前面试设置', exact: true });
     const row = summary.locator('dl > div').filter({
-      has: page.getByText('AI服务用量', { exact: true }).and(page.locator('dt')),
+      has: page.getByText(service, { exact: true }).and(page.locator('dt')),
     });
     await row.getByText(expected, { exact: true }).waitFor();
-    assert.deepEqual(await row.locator(':scope > dt, :scope > dd').allInnerTexts(), ['AI服务用量', expected]);
+    assert.deepEqual(await row.locator(':scope > dt, :scope > dd').allInnerTexts(), [service, expected]);
     assert.ok(await row.evaluate(node => {
       const label = node.querySelector('dt').getBoundingClientRect();
       const value = node.querySelector('dd').getBoundingClientRect();
@@ -201,44 +317,19 @@ async function runPreview() {
     await dialog.waitFor({ state: 'hidden' });
   }
   await openSettings();
-  const methods = settings.getByRole('radiogroup', { name: '连接方式', exact: true });
+  const methods = settings.getByRole('radiogroup', { name: '登录方式', exact: true });
   let connectSizes;
   if (check) {
     await methods.getByRole('radio', { name: '账号授权', exact: true }).click();
     const accountRows = settings.locator('[data-settings-target="chatgpt"], [data-settings-target="copilot"]');
     await accountRows.last().waitFor();
-    connectSizes = await accountRows.getByRole('button', { name: '连接', exact: true }).evaluateAll(
+    connectSizes = await accountRows.getByRole('button', { name: '登录', exact: true }).evaluateAll(
       buttons => buttons.map(button => [button.offsetWidth, button.offsetHeight]),
     );
   }
   await methods.getByRole('radio', { name: 'API 密钥', exact: true }).click();
   const active = settings.getByRole('group', { name: 'DeepSeek', exact: true });
-  const qwen = settings.getByRole('group', { name: '通义千问', exact: true });
-  const regionTrigger = qwen.getByRole('button', { name: '服务地域', exact: true });
-  async function selectedRegionWidth(name) {
-    assert.equal(await regionTrigger.getAttribute('aria-expanded'), 'false');
-    const label = regionTrigger.getByText(name, { exact: true }).and(
-      regionTrigger.locator('span:not([aria-hidden="true"], [aria-hidden="true"] *)'),
-    );
-    const { fits, width } = await label.evaluate(span => {
-      const trigger = span.closest('button');
-      const button = trigger.getBoundingClientRect();
-      const range = document.createRange();
-      range.selectNodeContents(span);
-      const text = range.getBoundingClientRect();
-      const bounds = span.getBoundingClientRect();
-      const right = trigger.querySelector('svg').getBoundingClientRect().left;
-      return { width: button.width, fits: text.width > 0 && text.left >= Math.max(button.left, bounds.left) - 1
-        && text.right <= Math.min(right, bounds.right) + 1 };
-    });
-    assert.ok(fits, name + ' fits beside the chevron');
-    return width;
-  }
-  async function chooseQwenRegion(name) {
-    await regionTrigger.click();
-    await page.getByRole('menuitemradio', { name, exact: true }).click();
-    return selectedRegionWidth(name);
-  }
+  const openai = settings.getByRole('group', { name: 'OpenAI API', exact: true });
   async function expectDetails(group, provider, open) {
     const id = 'api-settings-' + provider;
     await group.locator(`button[aria-controls="${id}"][aria-expanded="${open}"]`).waitFor();
@@ -263,7 +354,7 @@ async function runPreview() {
     assert.ok(await panel.evaluate(node => node.getBoundingClientRect().height > 0));
     assert.ok(await panel.getByRole('button', { name: /更换密钥|输入 API 密钥/ }).isVisible());
   }
-  async function checkUsageLayout(group, { balance, routing }) {
+  async function checkUsageLayout(group, { balance }) {
     const detail = group.locator('.api-service-details');
     const card = detail.locator('.api-usage.account-quota[aria-busy="false"]');
     await card.waitFor();
@@ -272,7 +363,6 @@ async function runPreview() {
     assert.deepEqual(await metrics.locator('dt').allTextContents(),
       balance ? ['账户余额', ...labels] : labels);
     assert.equal(await detail.locator('progress, [role="progressbar"], .account-quota-progress').count(), 0);
-    assert.equal(await detail.locator(':scope > .api-routing-fields').count(), routing ? 1 : 0);
     const layout = await detail.evaluate(node => {
       const bounds = element => element.getBoundingClientRect();
       const group = node.closest('.api-service');
@@ -287,33 +377,9 @@ async function runPreview() {
       const textActions = [...keyRow.querySelectorAll('.api-text-action:enabled')];
       const key = bounds(keyRow.querySelector('.api-key-value'));
       const links = bounds(keyRow.querySelector('.api-links'));
-      const routing = node.querySelector('.api-routing-fields');
-      const workspace = routing?.querySelector('input');
-      const wideInput = workspace?.getBoundingClientRect().width;
-      function routingInline() {
-        if (!routing) return true;
-        const fields = [...routing.querySelectorAll('.api-routing-field > span:first-child, button, input')].map(bounds);
-        const row = bounds(routing);
-        return fields.length === 4 && Math.max(...fields.map(r => r.top)) < Math.min(...fields.map(r => r.bottom))
-          && fields.every((r, i) => r.width > 0 && r.left >= (i ? fields[i - 1].right : row.left) - 1
-            && r.right <= row.right + 1);
-      }
-      function singleRegionAligned() {
-        if (!workspace) return true;
-        const field = workspace.closest('.api-routing-field'), next = field.nextSibling;
-        const trigger = routing.querySelector('button'), width = bounds(trigger).width;
-        field.remove();
-        try {
-          const row = bounds(routing), label = bounds(trigger.previousElementSibling), button = bounds(trigger);
-          return Math.abs(label.left - row.left) <= 1 && Math.abs(button.right - row.right) <= 1
-            && Math.abs(button.width - width) <= 1 && button.left - label.right >= 32;
-        } finally {
-          routing.insertBefore(field, next);
-        }
-      }
-      const lastRow = routing ?? keyRow;
       const divider = bounds(group).bottom;
-      const nextHeader = group.nextElementSibling.querySelector('.ai-service-row');
+      const nextHeader = group.nextElementSibling?.querySelector('.ai-service-row');
+      const adjacent = nextHeader ?? group.previousElementSibling.querySelector('.ai-service-row');
       const headerPositions = header => [
         bounds(header.querySelector('.service-brand-icon')).left,
         bounds(header.querySelector('.ai-service-label strong')).left,
@@ -322,21 +388,20 @@ async function runPreview() {
           return [left, right];
         }),
       ];
-      const collapsed = headerPositions(nextHeader);
+      const collapsed = headerPositions(adjacent);
       const standardHeight = parseFloat(getComputedStyle(node).getPropertyValue('--control-height'));
       const wideTops = items.map(item => bounds(item).top);
       const openSides = style => [style.borderTopWidth, style.borderLeftWidth, style.borderRightWidth]
         .every(width => parseFloat(width) === 0);
       const normal = {
-        alignedServiceHeaders: nextHeader.querySelector('.api-service-disclosure').getAttribute('aria-expanded') === 'false'
+        alignedServiceHeaders: adjacent.querySelector('.api-service-disclosure').getAttribute('aria-expanded') === 'false'
           && headerPositions(serviceHeader).every((position, i) => Math.abs(position - collapsed[i]) <= 1),
         noOuterFrame: openSides(getComputedStyle(group)) && ['::before', '::after'].every(pseudo => {
           const style = getComputedStyle(group, pseudo);
           return style.content === 'none' || style.opacity === '0' || openSides(style);
         }),
         outlinedCard: parseFloat(getComputedStyle(usage).borderTopWidth) > 0,
-        innerDividers: items.slice(1).every(item => parseFloat(getComputedStyle(item).borderInlineStartWidth) > 0)
-          && (!routing || parseFloat(getComputedStyle(routing).borderBlockStartWidth) > 0),
+        innerDividers: items.slice(1).every(item => parseFloat(getComputedStyle(item).borderInlineStartWidth) > 0),
         refreshInCard: card.top <= refresh.top && heading.right < refresh.left &&
           heading.top < refresh.bottom && refresh.top < heading.bottom && refresh.bottom <= bounds(stats).top + 1,
         standardRefresh: Math.abs(refresh.height - standardHeight) < 1,
@@ -348,12 +413,10 @@ async function runPreview() {
         }),
         linksAtRight: key.right <= links.left + 1 && key.top < links.bottom && links.top < key.bottom &&
           Math.abs(links.right - bounds(keyRow).right) <= 1,
-        routingLast: lastRow === node.lastElementChild && (!routing || bounds(routing).top >= bounds(keyRow).bottom - 1),
-        routingInline: routingInline(),
-        singleRegionAligned: singleRegionAligned(),
+        keyRowLast: keyRow === node.lastElementChild,
         dividerLast: getComputedStyle(serviceHeader).borderBottomWidth === '0px' &&
-          parseFloat(getComputedStyle(group).borderBottomWidth) > 0 &&
-          bounds(lastRow).bottom < divider && divider <= bounds(nextHeader).top + 1,
+          (!nextHeader || (parseFloat(getComputedStyle(group).borderBottomWidth) > 0 &&
+            bounds(keyRow).bottom < divider && divider <= bounds(nextHeader).top + 1)),
       };
       const fittedWidth = node.style.width;
       try {
@@ -363,7 +426,6 @@ async function runPreview() {
         const contents = [...node.querySelectorAll('button, input, dt, dd')];
         return {
           ...normal,
-          narrowRouting: routingInline() && (!workspace || bounds(workspace).width < wideInput),
           narrowWraps: Math.max(...tops) - Math.min(...tops) > 1,
           narrowFits: node.scrollWidth <= node.clientWidth + 1 && contents.every(element => {
             const rect = bounds(element);
@@ -416,8 +478,8 @@ async function runPreview() {
     await refresh.click();
     await detail.locator('.api-usage[aria-busy="false"]').waitFor();
     await detail.getByText('28.50 CNY', { exact: true }).waitFor();
-    await checkUsageLayout(active, { balance: true, routing: false });
-    const actions = qwen.locator('.ai-service-actions').getByRole('button');
+    await checkUsageLayout(active, { balance: true });
+    const actions = openai.locator('.ai-service-actions').getByRole('button');
     const rectangles = () => actions.evaluateAll(async (buttons) => {
       await Promise.allSettled(buttons.flatMap(button => button.getAnimations().map(a => a.finished)));
       return buttons.map(button => {
@@ -433,47 +495,31 @@ async function runPreview() {
     const enableSize = [Math.round(idle[0].width), Math.round(idle[0].height)];
     assert.deepEqual(connectSizes, [enableSize, enableSize], 'Account Connect must match API Enable');
     console.log('Service buttons (CSS px)', { connect: connectSizes[0], enable: enableSize, remove: idle[1].width });
-    await qwen.getByRole('button', { name: '启用', exact: true }).click();
-    await expectDetails(qwen, 'qwen', true);
+    await openai.getByRole('button', { name: '启用', exact: true }).click();
+    await expectDetails(openai, 'openai', true);
     await expectDetails(active, 'deepseek', false);
-    await qwen.getByRole('textbox', { name: /工作区 ID/ }).waitFor();
-    const regionWidths = [];
-    for (const name of ['北京', '新加坡', '东京', '香港', '法兰克福', '弗吉尼亚'])
-      regionWidths.push(await chooseQwenRegion(name));
-    assert.ok(Math.max(...regionWidths) - Math.min(...regionWidths) <= 1, 'Region selection preserves trigger width');
-    await checkUsageLayout(qwen, { balance: false, routing: true });
-    await chooseQwenRegion('北京');
-    const removeKey = qwen.getByRole('button', { name: /^移除密钥/ });
+    await checkUsageLayout(openai, { balance: false });
+    const removeKey = openai.getByRole('button', { name: /^移除密钥/ });
     await removeKey.scrollIntoViewIfNeeded();
     const selected = await rectangles();
     await removeKey.click();
-    const confirmed = qwen.getByRole('button', { name: /^确认/ });
+    const confirmed = openai.getByRole('button', { name: /^确认/ });
     await confirmed.waitFor();
     assert.deepEqual(await rectangles(), selected, 'Confirming removal must preserve both capsules');
     await confirmed.click();
-    await expectDetails(qwen, 'qwen', false);
-    assert.equal(await qwen.getByRole('textbox', { name: /工作区 ID/ }).count(), 0);
-    assert.ok(await qwen.getByRole('button', { name: '启用', exact: true }).isDisabled());
-    const add = qwen.getByRole('button', { name: '添加密钥', exact: true });
-    const qwenToggle = qwen.locator('button[aria-controls="api-settings-qwen"]');
-    await qwenToggle.click();
-    await expectDetails(qwen, 'qwen', true);
-    await chooseQwenRegion('东京');
-    assert.ok(await add.isDisabled(), 'Tokyo requires a workspace');
-    await chooseQwenRegion('香港');
-    assert.ok(await add.isEnabled(), 'Hong Kong also accepts the shared regional endpoint');
-    await chooseQwenRegion('法兰克福');
-    assert.ok(await add.isDisabled(), 'Frankfurt requires a workspace');
-    await qwen.getByRole('textbox', { name: '工作区 ID', exact: true }).fill('fixture-space');
-    assert.ok(await add.isEnabled(), 'Frankfurt accepts a workspace-specific key');
-    await qwenToggle.click();
-    await expectDetails(qwen, 'qwen', false);
+    await expectDetails(openai, 'openai', false);
+    assert.ok(await openai.getByRole('button', { name: '启用', exact: true }).isDisabled());
+    const add = openai.getByRole('button', { name: '添加密钥', exact: true });
+    const openaiToggle = openai.locator('button[aria-controls="api-settings-openai"]');
+    await openaiToggle.click();
+    await expectDetails(openai, 'openai', true);
+    await openaiToggle.click();
+    await expectDetails(openai, 'openai', false);
     const prompt = page.getByRole('dialog', { name: '添加 API 密钥', exact: true });
     await add.click();
-    const sample = prompt.getByLabel('通义千问 API 密钥', { exact: true }).and(prompt.locator('input'));
+    const sample = prompt.getByLabel('OpenAI API 密钥', { exact: true }).and(prompt.locator('input'));
     await sample.waitFor();
     assert.equal(await sample.getAttribute('placeholder'), null);
-    assert.equal(await prompt.locator('.dialog-subtitle').count(), 0);
     for (const name of ['取消', '验证并保存', '显示密钥'])
       await prompt.getByRole('button', { name, exact: true }).locator('svg').waitFor();
     const textInset = await sample.evaluate(input => {
@@ -484,8 +530,6 @@ async function runPreview() {
     assert.ok(Math.abs(textInset - 12) < 0.02, 'Match the 12px inset of a standard settings input');
     await prompt.getByRole('button', { name: '取消', exact: true }).click();
     await prompt.waitFor({ state: 'hidden' });
-    await qwenToggle.click();
-    await chooseQwenRegion('弗吉尼亚');
     await add.click();
     const save = prompt.getByRole('button', { name: '验证并保存', exact: true });
     for (let attempt = 0; attempt < 2; attempt++) {
@@ -525,7 +569,7 @@ async function runPreview() {
     await prompt.getByRole('button', { name: /隐藏.*密钥/ }).click();
     await prompt.locator('[data-api-key-field] input[type=password]').waitFor();
     await prompt.getByRole('button', { name: '验证并保存', exact: true }).click();
-    await qwen.getByRole('button', { name: /^移除密钥/ }).waitFor();
+    await openai.getByRole('button', { name: /^移除密钥/ }).waitFor();
     await active.getByRole('button', { name: '启用', exact: true }).click();
     await expectDetails(active, 'deepseek', true);
     await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
@@ -535,74 +579,42 @@ async function runPreview() {
       await menu.getByRole('menuitemradio', { name, exact: true }).waitFor();
     await menu.getByRole('menuitem', { name: '刷新模型列表', exact: true }).waitFor();
     await page.keyboard.press('Escape');
-    await checkInterviewBilling('DeepSeek API计费', 'VoxCue-1.3.0-API-billing');
+    await checkInterviewBilling('DeepSeek API', '剩余 28.50 CNY', 'VoxCue-1.3.0-API-billing');
     await openSettings();
     await active.getByRole('button', { name: '禁用', exact: true }).waitFor();
     await settings.locator('#api-settings-deepseek').getByRole('button', { name: /更换.*密钥/ }).waitFor();
   }
-  if (await settings.getByRole('button', { name: /^移除密钥/ }).count() !== 8)
-    throw Error('八家模拟服务尚未全部配置。');
-  await qwen.getByRole('button', { name: '启用', exact: true }).click();
-  await qwen.getByRole('button', { name: '禁用', exact: true }).waitFor();
-  await expectDetails(qwen, 'qwen', true);
-  let displayed = qwen;
+  if (await settings.getByRole('button', { name: /^移除密钥/ }).count() !== 2)
+    throw Error('两家模拟 API 服务尚未全部配置。');
+  await openai.getByRole('button', { name: '启用', exact: true }).click();
+  await openai.getByRole('button', { name: '禁用', exact: true }).waitFor();
+  await expectDetails(openai, 'openai', true);
   if (check) {
-    await selectedRegionWidth('弗吉尼亚');
-    await qwen.getByRole('button', { name: '更换密钥', exact: true }).click();
+    await openai.getByRole('button', { name: '更换密钥', exact: true }).click();
     const replace = page.getByRole('dialog', { name: '更换 API 密钥', exact: true });
-    const field = replace.getByLabel('通义千问 API 密钥', { exact: true }).and(replace.locator('input'));
+    const field = replace.getByLabel('OpenAI API 密钥', { exact: true }).and(replace.locator('input'));
     await field.waitFor();
     assert.ok(await field.evaluate(input => input.validity.valueMissing && !input.placeholder));
-    assert.equal(await replace.locator('.dialog-subtitle').count(), 0);
     await replace.getByRole('button', { name: '取消', exact: true }).click();
     await replace.waitFor({ state: 'hidden' });
-    displayed = settings.getByRole('group', { name: 'Claude API', exact: true });
-    await displayed.getByRole('button', { name: '启用', exact: true }).click();
-    await expectDetails(displayed, 'anthropic', true);
-    const workspace = await displayed.locator('.api-routing-fields > label:only-child input').evaluate(input => {
-      const detail = input.closest('.api-service-details');
-      const standard = parseFloat(getComputedStyle(input).getPropertyValue('--settings-control-width'));
-      function measure() {
-        const field = input.getBoundingClientRect();
-        const label = input.closest('label').firstElementChild.getBoundingClientRect();
-        const card = detail.querySelector('.api-usage').getBoundingClientRect();
-        return {
-          aligned: Math.abs(label.left - card.left) <= 1 && Math.abs(field.right - card.right) <= 1
-            && label.top < field.bottom && field.top < label.bottom,
-          gap: field.left - label.right,
-          width: field.width,
-        };
-      }
-      const wide = measure(), previous = detail.style.width;
-      try {
-        detail.style.width = '280px';
-        return { standard, wide, narrow: measure() };
-      } finally {
-        detail.style.width = previous;
-      }
-    });
-    assert.ok(workspace.wide.aligned && workspace.wide.gap >= 32
-      && Math.abs(workspace.wide.width - workspace.standard) <= 1, 'Claude uses a standard input at the far right');
-    assert.ok(workspace.narrow.aligned && workspace.narrow.gap >= 0
-      && workspace.narrow.width > 0 && workspace.narrow.width < workspace.wide.width, 'Narrow Claude input shrinks without overlapping its label');
     await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
-    const claudeMenu = await openModelMenu(page);
-    await claudeMenu.getByRole('menuitemradio', { name: 'Claude Opus 5.5', exact: true }).waitFor();
+    const openaiMenu = await openModelMenu(page);
+    await openaiMenu.getByRole('menuitemradio', { name: /6\.2.*sol/i }).waitFor();
     await page.keyboard.press('Escape');
-    await checkInterviewBilling('Claude API计费');
+    await checkInterviewBilling('OpenAI API', 'API计费');
     if (!checkOnly) {
       await openSettings();
-      await expectDetails(displayed, 'anthropic', true);
+      await expectDetails(openai, 'openai', true);
     }
   }
   if (checkOnly) {
     await checkProviderLogos();
     console.log('API settings interaction checks passed.');
   } else {
-    await displayed.evaluate(row => row.scrollIntoView({ block: 'center', behavior: 'instant' }));
+    await openai.evaluate(row => row.scrollIntoView({ block: 'center', behavior: 'instant' }));
     await (await app.browserWindow(page)).evaluate(win => win.setTitle('VoxCue · API 密钥模拟预览'));
     console.log(
-      `API_PREVIEW_READY — 8 家已配置，${await displayed.getAttribute('aria-label')} 已启用并展开。余额和回复均为模拟数据。可使用 demo-key 试填。关闭主窗口后自动清理。`,
+      `API_PREVIEW_READY — 2 家已配置，${await openai.getAttribute('aria-label')} 已启用并展开。余额和回复均为模拟数据。可使用 demo-key 试填。关闭主窗口后自动清理。`,
     );
     await page.waitForEvent('close', { timeout: 0 });
   }

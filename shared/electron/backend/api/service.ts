@@ -7,28 +7,25 @@ import { ChatGPTService } from '../chat/service';
 import { ChatServiceError, invalidatesModelCatalog } from '../chat/errors';
 import { ModelCatalog } from '../chat/modelCatalog';
 import { modelId, record } from '../chat/models';
-import type { AIChatService } from '../chat/ports';
-import { readErrorResponse, requestResponse } from '../chat/responses';
+import { requestResponse } from '../chat/responses';
+import { recoverApiProfileOutput } from '../chat/profileRecovery';
 import { validateRequest } from '../chat/validation';
 import type { UsageLedger } from '../chat/usage';
-import { claude, claudeHeaders, claudeModels, compatibleApis } from './catalogs';
-import { chineseProviders } from './chineseProviders';
+import { deepseekApi } from './catalogs';
+import { deepSeekProSearchModel, deepSeekResponsesEvents, prepareDeepSeekResponsesRequest } from './deepseekResponses';
+import { deepSeekProfileRecovery, deepSeekStructureRequest } from './deepseekProfile';
 import { messagesBody, receiveMessages } from './messages';
-import type { ApiCredential, ApiModel, CatalogGet, CompatibleApi } from './types';
+import type { ApiChatService, ApiCredential, ApiModel, CatalogGet } from './types';
 
 export type { ApiCredential } from './types';
-const adapters: Record<Exclude<ApiProvider, 'openai' | 'anthropic'>, CompatibleApi> = {
-  ...compatibleApis,
-  ...chineseProviders,
-};
-type ApiService = AIChatService & { invalidateModels(): void };
 
 function accountOf(provider: ApiProvider, credential: ApiCredential) {
+  // Keep the existing usage ledger keys for all retained connections.
   return (
     provider +
     ':' +
     createHash('sha256')
-      .update(JSON.stringify([credential.key, credential.region ?? '', credential.workspace ?? '']))
+      .update(JSON.stringify([credential.key, '', '']))
       .digest('hex')
   );
 }
@@ -42,11 +39,11 @@ function identity(provider: ApiProvider): ModelProvider {
 function apiFailure(status?: number) {
   const message =
     status === 401
-      ? 'API 密钥未被接受，请检查密钥与所选地域或工作区。'
+      ? 'API 密钥未被接受，请检查密钥。'
       : status === 402
         ? 'API 账户可用余额不足，请查看服务商账单。'
         : status === 403
-          ? 'API 账户无权访问该服务，请检查权限、地域与套餐。'
+          ? 'API 账户无权访问该服务，请检查权限与套餐。'
           : status === 404
             ? '所选 API 模型或端点不可用，请检查配置并刷新模型列表。'
             : status === 429
@@ -83,14 +80,9 @@ function openAIFailure(status: number | undefined, body: unknown) {
   return apiFailure(status);
 }
 
-async function checkApiResponse(response: Response, signal: AbortSignal, failure?: CompatibleApi['failure']) {
+function checkApiResponse(response: Response) {
   if (response.ok) return;
-  if (failure) {
-    const detail = failure(response.status, await readErrorResponse(response, signal));
-    if (detail) throw detail;
-  } else {
-    void response.body?.cancel().catch(() => {});
-  }
+  void response.body?.cancel().catch(() => {});
   throw apiFailure(response.status);
 }
 
@@ -98,24 +90,20 @@ function getJson(
   credential: ApiCredential,
   fetcher: typeof fetch,
   signal: AbortSignal,
-  failure?: CompatibleApi['failure'],
 ): CatalogGet {
-  return async (url, extra = {}) => {
+  return async (url) => {
     signal.throwIfAborted();
     const response = await requestResponse(
       fetcher,
       url,
       {
-        headers: {
-          ...(extra['x-goog-api-key'] ? {} : { authorization: 'Bearer ' + credential.key }),
-          ...extra,
-        },
+        headers: { authorization: 'Bearer ' + credential.key },
         cache: 'no-store',
         redirect: 'error',
       },
       signal,
     );
-    await checkApiResponse(response, signal, failure);
+    checkApiResponse(response);
     try {
       return await boundedJson(response, 4 * 1024 * 1024, signal);
     } catch {
@@ -131,11 +119,9 @@ export async function readApiBalance(
   signal = new AbortController().signal,
   fetcher: typeof fetch = fetch,
 ): Promise<ApiBalance[]> {
-  const adapter =
-    provider === 'openai' || provider === 'anthropic' ? undefined : adapters[provider];
-  if (!adapter?.balance) return [];
+  if (provider !== 'deepseek') return [];
   const deadline = AbortSignal.any([signal, AbortSignal.timeout(15000)]);
-  return adapter.balance(credential, getJson(credential, fetcher, deadline));
+  return deepseekApi.balance(getJson(credential, fetcher, deadline));
 }
 
 export function createApiChatService(
@@ -143,7 +129,7 @@ export function createApiChatService(
   credential: () => Promise<ApiCredential>,
   ledger: UsageLedger,
   fetcher: typeof fetch = fetch,
-): ApiService {
+): ApiChatService {
   const owner = identity(provider);
   if (provider === 'openai') {
     return new ChatGPTService({
@@ -157,14 +143,13 @@ export function createApiChatService(
       },
     });
   }
-  const adapter = provider === 'anthropic' ? undefined : adapters[provider];
+  if (provider !== 'deepseek') throw Error('不支持此 API 服务。');
   const catalog = new ModelCatalog<ApiModel>();
   const account = async () => accountOf(provider, await credential());
   const readModels = (secret: ApiCredential, force: boolean, signal: AbortSignal) => {
     const expected = accountOf(provider, secret);
     return catalog.read(expected, force, signal, async (deadline) => {
-      const get = getJson(secret, fetcher, deadline, adapter?.failure);
-      const result = adapter ? await adapter.models(secret, get) : await claudeModels(secret, get);
+      const result = await deepseekApi.models(getJson(secret, fetcher, deadline));
       if ((await abortable(account(), deadline)) !== expected)
         throw Error('API 连接已更改，请重新选择模型。');
       const distinct = new Map<string, ApiModel>();
@@ -201,13 +186,18 @@ export function createApiChatService(
         if (!model) throw Error('所选 API 模型当前不可用，请刷新模型列表。');
         if (request.effort && !model.reasoningEfforts?.includes(request.effort))
           throw Error('所选模型不支持该思考强度，请选择自动或刷新模型列表。');
-        const body = await messagesBody(request, model, adapter, signal);
-        signal.throwIfAborted();
-        emit({ id: request.id, type: 'provider', provider: owner });
-        const response = await requestResponse(
-          fetcher,
-          adapter ? adapter.endpoint(secret) : claude + '/messages',
-          {
+        return await recoverApiProfileOutput(request, emit, signal, async (attempt, publish, deadline, recovering) => {
+          const searchEnabled = !!attempt.profile && attempt.webSearch;
+          const flashSearch = searchEnabled && model.id === 'deepseek-flash';
+          const responsesSearch = searchEnabled && model.id === deepSeekProSearchModel &&
+            !attempt.turns.some(turn => turn.files?.length);
+          const body = await messagesBody(attempt, model, deadline, flashSearch, responsesSearch, recovering);
+          deadline.throwIfAborted();
+          const deepSeekRequest = responsesSearch ? prepareDeepSeekResponsesRequest(body) : undefined;
+          if (responsesSearch && !deepSeekRequest) throw Error('所选模型无法发送此联网请求。');
+          publish({ id: attempt.id, type: 'provider', provider: owner });
+          const url = deepSeekRequest?.url ?? deepseekApi.endpoint;
+          const init: RequestInit = {
             method: 'POST',
             redirect: 'error',
             cache: 'no-store',
@@ -215,23 +205,30 @@ export function createApiChatService(
               authorization: 'Bearer ' + secret.key,
               'content-type': 'application/json',
               accept: 'text/event-stream',
-              ...(adapter ? {} : claudeHeaders(secret)),
             },
-            body,
-          },
-          signal,
-        );
-        await checkApiResponse(response, signal, adapter?.failure);
-        const result = await receiveMessages(
-          response,
-          request,
-          !adapter,
-          emit,
-          signal,
-          (id, tokens) => ledger.add(accountOf(provider, secret), id, tokens),
-        );
-        signal.throwIfAborted();
-        return { ...result, provider: owner };
+            body: deepSeekRequest?.body ?? body,
+          };
+          const response = await requestResponse(fetcher, url, init, deadline);
+          checkApiResponse(response);
+          // Same model and context without tools: ask only whether the shown answer proposes changes.
+          const requestStructure = async (answerText: string) => {
+            const followUp = { ...attempt, turns: [...attempt.turns,
+              { role: 'assistant' as const, content: answerText },
+              { role: 'user' as const, content: deepSeekStructureRequest }] };
+            const structureBody = await messagesBody(followUp, model, deadline, false, false, true);
+            const structure = await requestResponse(fetcher, deepseekApi.endpoint, { ...init, body: structureBody }, deadline);
+            checkApiResponse(structure);
+            return structure;
+          };
+          const result = await receiveMessages(response, attempt, publish, deadline,
+            (id, tokens) => ledger.add(accountOf(provider, secret), id, tokens), {
+              webSearch: flashSearch || responsesSearch,
+              events: deepSeekRequest ? deepSeekResponsesEvents(response, deadline) : undefined,
+              requestStructure,
+            });
+          deadline.throwIfAborted();
+          return { ...result, provider: owner };
+        }, 'preview', deepSeekProfileRecovery);
       } catch (error) {
         if (!signal.aborted && invalidatesModelCatalog(error)) catalog.expire();
         throw error;

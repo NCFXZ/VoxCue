@@ -5,11 +5,16 @@ import { useChatConnection } from './chatConnection';
 import {
   providerCredentialMessages,
   providerCredentialStatus,
+  type AccountService,
   type AIService,
   type AuthSession,
+  type AuthUser,
 } from '../../electron/contracts/auth';
 interface AuthState {
   session: AuthSession | null;
+  accounts: AccountService[];
+  accountUsers: Partial<Record<AccountService, Pick<AuthUser, 'name' | 'email'>>>;
+  accountsLoaded: boolean;
   resolved: boolean;
   startupChecked: boolean;
   loading: boolean;
@@ -20,9 +25,11 @@ interface AuthState {
   notice: string | null;
   restoreOnStartup(): Promise<void>;
   ensure(): Promise<void>;
+  loadAccounts(): Promise<void>;
   connect(service: AIService): Promise<void>;
+  disable(): Promise<boolean>;
   cancel(): Promise<void>;
-  signOut(): Promise<boolean>;
+  signOut(service?: AccountService): Promise<boolean>;
 }
 const message = (error: unknown) =>
   error instanceof Error
@@ -39,14 +46,26 @@ function failure(error: unknown, fallback?: string) {
 export const useAuth = create<AuthState>((set, get) => {
   let restoring: Promise<void> | undefined;
   let startup: Promise<void> | undefined;
+  let accountRevision = 0;
+  let accountRequest = 0;
   const applySession = async (session: AuthSession | null) => {
-    set({ session, resolved: true, error: null, connectionNotice: null });
+    const mode = session?.mode;
+    set({
+      session, resolved: true, error: null, connectionNotice: null,
+      ...(session && (mode === 'chatgpt' || mode === 'copilot')
+        ? { accounts: [...get().accounts.filter((item) => item !== mode), mode],
+            accountUsers: { ...get().accountUsers, [mode]: { name: session.user.name, email: session.user.email } },
+          } : {}),
+    });
     await useChatConnection
       .getState()
       .load(!!session && session.mode !== 'demo', false, session?.mode);
   };
   return {
     session: null,
+    accounts: [],
+    accountUsers: {},
+    accountsLoaded: false,
     resolved: false,
     startupChecked: false,
     loading: false,
@@ -89,8 +108,23 @@ export const useAuth = create<AuthState>((set, get) => {
         });
       return restoring;
     },
+    async loadAccounts() {
+      const revision = accountRevision;
+      const request = ++accountRequest;
+      try {
+        const connections = await authentication.accounts();
+        if (revision === accountRevision && request === accountRequest)
+          set({ accounts: connections.map(entry => entry.service),
+            accountUsers: Object.fromEntries(connections.map(({ service, name, email }) => [service, { name, email }])),
+            accountsLoaded: true });
+      } catch (error) {
+        if (revision === accountRevision && request === accountRequest)
+          set(failure(error, '无法读取本地登录信息，请检查应用数据后重试。'));
+      }
+    },
     async connect(service) {
       if (get().waiting || get().loading) return;
+      accountRevision++;
       set({ waiting: true, error: null, connectionNotice: null, notice: null });
       try {
         let session = await authentication.session(service);
@@ -101,6 +135,7 @@ export const useAuth = create<AuthState>((set, get) => {
         if (session && session.mode !== 'demo' && session.mode !== get().session?.mode)
           startServiceModelSwitch(session.mode);
         await applySession(session);
+        await get().loadAccounts();
       } catch (error) {
         set(failure(error));
       } finally {
@@ -114,12 +149,35 @@ export const useAuth = create<AuthState>((set, get) => {
         set({ error: '取消登录失败，请稍后重试。', connectionNotice: null });
       }
     },
-    async signOut() {
+    async disable() {
       if (get().waiting || get().loading) return false;
+      accountRevision++;
+      set({ waiting: true, error: null, connectionNotice: null, notice: null });
+      try {
+        await authentication.disable();
+        await applySession(null);
+        await get().loadAccounts();
+        return true;
+      } catch (error) {
+        set({ error: message(error) });
+        return false;
+      } finally {
+        set({ waiting: false });
+      }
+    },
+    async signOut(service) {
+      if (get().waiting || get().loading) return false;
+      accountRevision++;
       set({ waiting: true, error: null, connectionNotice: null });
       try {
-        const result = await authentication.signOut();
-        await applySession(null);
+        const target = service ?? get().session?.mode;
+        const result = await authentication.signOut(service);
+        if (target === 'chatgpt' || target === 'copilot') useChatConnection.getState().clearSavedUsage(target);
+        if (!service || get().session?.mode === service) await applySession(null);
+        const accountUsers = { ...get().accountUsers };
+        if (target === 'chatgpt' || target === 'copilot') delete accountUsers[target];
+        set({ accounts: get().accounts.filter((item) => item !== target), accountUsers });
+        await get().loadAccounts();
         set({ notice: result.warning });
         return true;
       } catch (error) {

@@ -242,7 +242,9 @@ try {
     const edge = switches.at(-1).getBoundingClientRect().right;
     // DOMRect float noise can straddle a device-pixel midpoint for one layout edge.
     const deviceEdge = x => Math.round((Math.round(x * 64) / 64) * devicePixelRatio);
-    const reservedScrollbar = parseFloat(getComputedStyle(body).getPropertyValue('--panel-scrollbar-width')) || 0;
+    const style = getComputedStyle(body);
+    const reservedScrollbar = parseFloat(style.getPropertyValue('--panel-scrollbar-width')) || 0;
+    const rightBorder = parseFloat(style.borderRightWidth) || 0;
     return {
       buttons: buttons.length,
       rightGap: box.right - last.right,
@@ -252,8 +254,10 @@ try {
       leftInset: box.left - panel.left,
       rightInset: panel.right - last.right,
       drawnEdges: [deviceEdge(box.left), deviceEdge(last.right)],
+      // clientWidth rounds fractional CSS widths before device-pixel conversion.
+      // Keep the parent's fractional edge through the same conversion as the child.
       expectedEdges: [deviceEdge(panel.left + body.clientLeft + 24),
-        deviceEdge(panel.left + body.clientLeft + body.clientWidth - Math.max(0, 24 - reservedScrollbar))],
+        deviceEdge(panel.right - rightBorder - reservedScrollbar - Math.max(0, 24 - reservedScrollbar))],
     };
   });
   assert.equal(syncAlignment.buttons, 2);
@@ -261,7 +265,9 @@ try {
     layoutUnit(syncAlignment.rightGap) === 0 &&
       layoutUnit(syncAlignment.commonRight) === 0 &&
       layoutUnit(syncAlignment.buttonGap) === layoutUnit(8) &&
-      layoutUnit(syncAlignment.centers) === 0,
+      layoutUnit(syncAlignment.centers) === 0 &&
+      layoutUnit(syncAlignment.leftInset) === layoutUnit(24) &&
+      layoutUnit(syncAlignment.rightInset) === layoutUnit(24),
     'Sync actions share the settings right edge and 24px content insets, with one aligned row and an 8px gap: ' +
       JSON.stringify(syncAlignment),
   );

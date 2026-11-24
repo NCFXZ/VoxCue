@@ -1,10 +1,12 @@
-import type { AIService, AuthSession, SignOutResult } from '../../electron/contracts/auth';
+import type { AccountConnection, AccountService, AIService, AuthSession, SignOutResult } from '../../electron/contracts/auth';
 import { isApiProvider } from '../../electron/contracts/apiConnections';
 export interface AuthenticationService {
   session(service?: AuthSession['mode'] | 'startup'): Promise<AuthSession | null>;
   signIn(service?: AIService): Promise<AuthSession>;
   cancel(): Promise<void>;
-  signOut(): Promise<SignOutResult>;
+  accounts(): Promise<AccountConnection[]>;
+  disable(): Promise<void>;
+  signOut(service?: AccountService): Promise<SignOutResult>;
 }
 export const authentication: AuthenticationService = {
   session: async (service) => window.desktop?.authSession(service) ?? null,
@@ -18,5 +20,7 @@ export const authentication: AuthenticationService = {
   cancel: async () => {
     await window.desktop?.cancelSignIn();
   },
-  signOut: async () => (window.desktop ? window.desktop.signOut() : { warning: null }),
+  accounts: async () => window.desktop ? window.desktop.accountConnections() : [],
+  disable: async () => { await window.desktop?.disableAIService(); },
+  signOut: async (service) => (window.desktop ? window.desktop.signOut(service) : { warning: null }),
 };

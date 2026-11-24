@@ -35,7 +35,6 @@ import { InterviewReveal } from './InterviewReveal';
 import { useInterviewSettings } from '../stores/interviewSettings';
 import { useGeneralSettings } from '../stores/generalSettings';
 import { useChatConnection } from '../stores/chatConnection';
-import { version } from '../../package.json';
 import { pendingPresentation } from '../../electron/contracts/presentation';
 import { ShortcutSettings } from './ShortcutSettings';
 import { useSettingsTarget, type SettingsTarget } from './ui/useSettingsTarget';
@@ -289,15 +288,9 @@ export function SettingsDialog({
               </>
             )}
             {category === 'about' && (
-              <>
-                <div className="settings-entry">
-                  <strong>VoxCue</strong>
-                  <span className="settings-value">{version}</span>
-                </div>
-                <section className="settings-about-updates" aria-label={t('软件更新')}>
-                  <UpdatesPanel showVersion={false} />
-                </section>
-              </>
+              <section className="settings-about-updates" aria-label={t('软件更新')}>
+                <UpdatesPanel />
+              </section>
             )}
           </div>
         </section>

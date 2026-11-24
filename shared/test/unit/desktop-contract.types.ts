@@ -31,6 +31,9 @@ const providerReply: ChatResult = { ok: true, provider: modelProvider, usage: nu
 void [providerModel, providerReply];
 
 declare const desktop: DesktopAPI;
+desktop.announcements();
+// @ts-expect-error The announcement endpoint and login state cannot be supplied by Renderer.
+desktop.announcements({ url: 'https://elsewhere.test', signedIn: true });
 const stopShortcuts: () => void = desktop.onInterviewShortcut((command) => {
   const fixed: InterviewShortcutCommand = command;
   void fixed;
@@ -77,9 +80,19 @@ desktop.setContentControls([]);
 // @ts-expect-error Native menus are retired; menus render in shared React.
 desktop.popUpNativeMenu({});
 desktop.chatAccountUsage();
+desktop.chatAccountUsage('copilot');
+// @ts-expect-error Account usage does not accept an API provider.
+desktop.chatAccountUsage('openai');
 // @ts-expect-error Account quota uses the signed-in service, never a renderer token or account.
 desktop.chatAccountUsage({ token: 'private', account: 'other' });
 desktop.signInWithCopilot();
+desktop.accountConnections();
+desktop.disableAIService();
+desktop.signOut('chatgpt');
+// @ts-expect-error Sign out only targets a supported account service.
+desktop.signOut('openai');
+// @ts-expect-error Disabling never accepts credentials or a provider payload.
+desktop.disableAIService({ token: 'forbidden' });
 // @ts-expect-error Copilot login accepts no token, URL or runtime path.
 desktop.signInWithCopilot({ token: 'forbidden' });
 const runningPlatform: 'macos' | 'windows' | 'unknown' = desktop.platform;

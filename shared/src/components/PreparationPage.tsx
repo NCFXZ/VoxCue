@@ -1,7 +1,7 @@
 import { InterviewReveal } from './InterviewReveal';
 import { useInterviewAudioPreview } from './InterviewAudioPreview';
 import { t, uiLocale } from '../i18n';
-import { isApiProvider } from '../../electron/contracts/apiConnections';
+import { isApiProvider, type ApiBalance } from '../../electron/contracts/apiConnections';
 import { hasReadySpeechModel, type ComponentId } from '../../electron/contracts/components';
 import { useTextareaSize } from './useTextareaSize';
 import { playSentMessageEnter } from '../lib/messageMotion';
@@ -18,6 +18,9 @@ import { ComponentsNotice } from './ComponentsNotice';
 import { LocalImportNotice } from './LocalImportNotice';
 import { SyncConflictNotice } from './SyncConflictNotice';
 import { HomeNoticeSlot } from './SettingsNotice';
+import { UpdateNotice } from './UpdateNotice';
+import { AnnouncementNotice } from './AnnouncementNotice';
+import type { AnnouncementTarget } from '../../electron/contracts/announcements';
 import {
   ArrowUp,
   MessageSquare,
@@ -49,6 +52,7 @@ import { InterviewInputModeControl } from './InterviewInputModeControl';
 import { AccessSkeleton, InterviewAccessList } from './InterviewAccessList';
 import { useShortcuts } from '../stores/shortcuts';
 import { useHeightTransition } from './ui/useHeightTransition';
+import { useNoticeStackMotion } from './ui/useNoticeStackMotion';
 import { Modal } from './ui/modal';
 import { PanelResizeHandle } from './ui/PanelResizeHandle';
 import { PreparationMessage } from './PreparationMessage';
@@ -59,6 +63,7 @@ import { FollowLatestButton } from './FollowLatestButton';
 import { localKnowledge } from '../services/knowledge';
 import { readDroppedFiles, effortLabels } from '../services/chatOptions';
 import { useChatConnection } from '../stores/chatConnection';
+import { apiConnections } from '../services/apiConnections';
 import { accountUsageSummaryParts } from '../services/accountUsageSummary';
 import { AccountUsageSummary, InterviewApiBillingRow } from './AccountUsageSummary';
 import { useModelProvider } from './useModelProvider';
@@ -72,6 +77,7 @@ export function PreparationPage({
   onSpeechSettings,
   onAISettings,
   onDraftChange,
+  onAnnouncementAction,
 }: {
   visible: boolean;
   onImportSettings?(): void;
@@ -79,6 +85,7 @@ export function PreparationPage({
   onSpeechSettings?(): void;
   onAISettings?(locateProviders: boolean): void;
   onDraftChange?(dirty: boolean): void;
+  onAnnouncementAction?(target: Exclude<AnnouncementTarget, 'personal-info'>): void;
 }) {
   const state = usePreparation();
   const approvedDeviceRevision = useRemoteConnection(remote => remote.state?.approvalRevision);
@@ -107,6 +114,7 @@ export function PreparationPage({
   const inputRef = useTextareaSize(input);
   const composerArea = useRef<HTMLDivElement>(null);
   const notices = useRef<HTMLDivElement>(null);
+  useNoticeStackMotion(notices);
   const workspace = useRef<HTMLElement>(null);
   const measureComposerSpace = () => {
     const area = composerArea.current;
@@ -208,6 +216,18 @@ export function PreparationPage({
     };
   }, []);
   const [confirmInterview, setConfirmInterview] = useState(false);
+  const [deepSeekBalances, setDeepSeekBalances] = useState<ApiBalance[] | null>();
+  const readDeepSeekBalance = confirmInterview && connection.live && connection.service === 'deepseek';
+  useEffect(() => {
+    setDeepSeekBalances(undefined);
+    if (!readDeepSeekBalance) return;
+    let current = true;
+    void apiConnections.balance('deepseek').then(
+      (balances) => { if (current) setDeepSeekBalances(balances); },
+      () => { if (current) setDeepSeekBalances(null); },
+    );
+    return () => { current = false; };
+  }, [readDeepSeekBalance]);
   const [openingInterview, setOpeningInterview] = useState(false);
   const [interviewError, setInterviewError] = useState<string | null>(null);
   const [interviewDevices, setInterviewDevices] = useState<AudioDevice[]>([]);
@@ -634,7 +654,8 @@ export function PreparationPage({
                   </dd>
                 </div>
                 {connection.live && !connection.loadingUsage && isApiProvider(connection.service) ? (
-                  <InterviewApiBillingRow provider={connection.service} />
+                  <InterviewApiBillingRow provider={connection.service}
+                    balances={connection.service === 'deepseek' ? deepSeekBalances : undefined} />
                 ) : (
                   <div>
                     <dt>{connection.live && usageSummary ? usageSummary.title : t('AI 服务用量')}</dt>
@@ -863,6 +884,11 @@ export function PreparationPage({
             </div>
           )}
           <div ref={notices} className="chat-settings-notices">
+            <UpdateNotice />
+            <AnnouncementNotice onNavigate={(target) => {
+              if (target === 'personal-info') openInfo();
+              else onAnnouncementAction?.(target);
+            }} />
             <HomeNoticeSlot>
               <SyncConflictNotice />
             </HomeNoticeSlot>

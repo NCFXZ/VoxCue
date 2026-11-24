@@ -33,6 +33,7 @@ const appxBaselines = new Map([
   ['--appx-upgrade', ['1.2.3', '6d6fc9ae57aff3db3d66e317eb4444ddedbf9ecccf5fa60d2be270bea28d8fe4']],
   ['--appx-upgrade-1.2.2', ['1.2.2', 'b97c3b05c5550824c952d1a77aff02e5b110082e0b24e324c3e371926221a2e8', 'store']],
   ['--appx-upgrade-1.3.0', ['1.3.0', '4ff42cba5792d3460e9369614002361661f9410419992b9dffcb5d1ddfea5792', 'store']],
+  ['--appx-upgrade-1.3.2', ['1.3.2', '04b68c2d9d57eb10599be86f824be72e35deee58ff340b0b80e9e550488b7f9b', 'store']],
 ]);
 const appxUpgrade = appxBaselines.has(argument);
 // Published, immutable originals used before installing the current package.
@@ -42,6 +43,7 @@ const previousVersions = new Map([
   ['--nsis-upgrade-1.2.0', ['1.2.0', 'a83d1399fb2dae98cc4dfcf98924c6e571d6c17a461ca92a8292556bbcc610ae']],
   ['--nsis-upgrade-1.1.1', ['1.1.1', 'cb84c1f7b22f5e613a1401dc38e201817d78dac0b214721b8fbb7d6f09998bfd']],
   ['--nsis-upgrade-1.3.0', ['1.3.0', '4c1666dcc3488d58df75f69dc4a9686851564194b7dbe1271e6921c66fb1e36d', 'installer']],
+  ['--nsis-upgrade-1.3.2', ['1.3.2', '7dd66772bc6af35eedae829a15155f86faa55459499cb4db477723629b4389ad', 'installer']],
 ]);
 const nsisTask =
   argument === '--nsis-current' ? 'nsis-current'
@@ -403,7 +405,7 @@ function Check-ApiKeyPaste($directory) {
   $result.apiKeyPaste = $true
 }
 function Install-UpgradeRag($profileMarker) {
-  if ($config.ragDirectory -cnotmatch '^rag-1\.0\.0-[a-f0-9]{64}$' -or $config.previous.version -notin @('1.2.0','1.2.2','1.2.3','1.3.0')) { throw 'Unexpected upgrade component' }
+  if ($config.ragDirectory -cnotmatch '^rag-1\.0\.0-[a-f0-9]{64}$' -or $config.previous.version -notin @('1.2.0','1.2.2','1.2.3','1.3.0','1.3.2')) { throw 'Unexpected upgrade component' }
   $cache = Join-Path ([IO.Path]::GetDirectoryName($profileMarker)) 'component-cache'
   Assert-GuestProfilePath $cache
   if (Test-Path -LiteralPath $cache) { throw 'Upgrade fixture requires a fresh component cache' }

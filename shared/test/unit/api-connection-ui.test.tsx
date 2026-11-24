@@ -39,7 +39,7 @@ it('lists every API provider with two row actions before local credential status
   expect(html).not.toContain('•••• ••••');
 });
 
-it('uses the settings logo for each recorded API provider, including answers from older sessions', () => {
+it('uses the settings logo for recorded answers from supported API providers', () => {
   const image = (html: string) => html.match(/<img\b[^>]*\bsrc="([^"]+)"/)?.[1];
   const marks = apiProviderIds.map(id => {
     const { name, recipient } = apiProviders[id];
@@ -57,6 +57,33 @@ it('uses the settings logo for each recorded API provider, including answers fro
   });
   expect(new Set(marks).size).toBe(apiProviderIds.length);
   expect(image(renderToStaticMarkup(<ProviderIdentity provider="unknown" />))).toBeUndefined();
+});
+
+it.each([
+  ['anthropic', 'Claude API', 'Anthropic'],
+  ['gemini', 'Gemini API', 'Google'],
+  ['qwen', '通义千问', '千问AI平台'],
+  ['kimi', 'Kimi', 'Moonshot AI'],
+  ['glm', '智谱 GLM', '智谱 AI'],
+  ['doubao', '豆包', '火山方舟'],
+])('shows a retired %s answer as an unknown model with no connection controls', (id, name, dataRecipient) => {
+  for (const provider of [id, Object.freeze({ id, name, dataRecipient })]) {
+    const html = renderToStaticMarkup(<ProviderIdentity provider={provider} />);
+    expect(html).toContain('<strong class="provider-name">未知模型</strong>');
+    expect(html).toMatch(/<span class="provider-avatar"><svg\b[^>]*data-ui-icon/);
+    expect(html).not.toContain('service-brand-icon');
+    expect(html).not.toContain(name);
+  }
+  expect(renderToStaticMarkup(<ApiConnectionPanel />)).not.toContain(`id="api-settings-${id}"`);
+});
+
+it('labels retired answers in English while preserving the Copilot provider for hosted models', () => {
+  useGeneralSettings.setState({ language: 'en' });
+  expect(renderToStaticMarkup(<ProviderIdentity provider="qwen" />)).toContain('Unknown model');
+  const provider = { id: 'copilot', name: 'GitHub Copilot', dataRecipient: 'GitHub Copilot', modelVendor: 'Qwen' };
+  const html = renderToStaticMarkup(<ProviderIdentity provider={provider} />);
+  expect(html).toContain('<strong class="provider-name">GitHub Copilot</strong>');
+  expect(html).toContain('service-brand-icon');
 });
 
 it('groups the saved key, usage and links beneath the service header with a separate replace action', () => {
@@ -92,17 +119,6 @@ it('shows the three local counters individually and adds a fourth metric only fo
   }
 });
 
-it('opens Qwen details with the verified region and workspace', () => {
-  const html = renderToStaticMarkup(
-    <ApiProviderSettings provider="qwen" saved={{ provider: 'qwen', region: 'tokyo', workspace: 'fixture-space' }}
-      expanded known onExpand={vi.fn()} onChange={vi.fn()} />,
-  );
-  expect(html).toMatch(/aria-label="服务地域"[^>]*><span[^>]*>东京<\/span>/);
-  expect(html).toMatch(/<input[^>]*\brequired=""[^>]*\bvalue="fixture-space"/);
-  expect(html).toMatch(/class="api-detail-row"[\s\S]*?class="api-links"[\s\S]*?class="api-routing-fields"/);
-  expect(html).not.toContain('<dt>账户余额</dt>');
-});
-
 it.each([
   [false, '添加 API 密钥'],
   [true, '更换 API 密钥'],
@@ -130,7 +146,7 @@ it.each([
 });
 
 it.each([
-  ['anthropic', 'Claude API key'], ['gemini', 'Gemini API key'], ['qwen', 'Qwen API key'],
+  ['openai', 'OpenAI API key'], ['deepseek', 'DeepSeek API key'],
 ] as const)('labels the English secure field with the service name for %s', (provider, label) => {
   useGeneralSettings.setState({ language: 'en' });
   const html = renderToStaticMarkup(<ApiKeyDialog config={{ provider }} onFinish={vi.fn()} />);

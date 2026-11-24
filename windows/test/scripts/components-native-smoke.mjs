@@ -68,6 +68,22 @@ const launch = async () =>
 let app;
 try {
   app = await launch();
+  await app.evaluate(async ({ app, session }) => {
+    await app.whenReady();
+    const controller = new AbortController();
+    let refused = false;
+    try {
+      await session.fromPartition('offline-abort-regression').fetch('https://example.invalid/', {
+        signal: controller.signal,
+      });
+    } catch (error) {
+      if (!/Offline desktop regression forbids network access/.test(error.message)) throw error;
+      refused = true;
+    }
+    controller.abort();
+    await new Promise(resolve => setTimeout(resolve, 30));
+    if (!refused) throw Error('Offline session fetch was not refused');
+  });
   if (cacheSource) {
     const login = await app.firstWindow();
     await waitForAsync(
@@ -111,6 +127,9 @@ try {
   console.log(
     'PASS: Windows development build, real managed components, cache reuse, native exclusive handles and removal; no package or installer created.',
   );
+} catch (error) {
+  console.error('Native components failed before teardown:', error);
+  throw error;
 } finally {
   if (app) await closeUiApp(app);
 }

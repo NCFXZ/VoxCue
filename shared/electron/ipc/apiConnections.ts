@@ -14,33 +14,9 @@ const consoles: Record<ApiProvider, { keys: string; billing: string }> = {
     keys: 'https://platform.openai.com/api-keys',
     billing: 'https://platform.openai.com/settings/organization/billing/overview',
   },
-  anthropic: {
-    keys: 'https://platform.claude.com/settings/keys',
-    billing: 'https://platform.claude.com/settings/billing',
-  },
-  gemini: {
-    keys: 'https://aistudio.google.com/api-keys',
-    billing: 'https://aistudio.google.com/billing',
-  },
-  qwen: {
-    keys: 'https://help.aliyun.com/zh/model-studio/get-api-key',
-    billing: 'https://help.aliyun.com/zh/model-studio/bill-query-and-cost-management',
-  },
   deepseek: {
     keys: 'https://platform.deepseek.com/api_keys',
     billing: 'https://platform.deepseek.com/usage',
-  },
-  kimi: {
-    keys: 'https://platform.kimi.com/console/api-keys',
-    billing: 'https://platform.kimi.com/console/fee-detail',
-  },
-  glm: {
-    keys: 'https://bigmodel.cn/usercenter/proj-mgmt/apikeys',
-    billing: 'https://open.bigmodel.cn/finance/expensebill/list?active=detail',
-  },
-  doubao: {
-    keys: 'https://ark.volcengine.com/region:cn-beijing/apiKey?apikey=%7B%7D',
-    billing: 'https://console.volcengine.com/finance/bill/detail',
   },
 };
 function fieldBounds(value: unknown): ApiKeyField {

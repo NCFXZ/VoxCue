@@ -2,7 +2,6 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { copilotAccountUsage } from '../../electron/backend/copilot/quota';
 import { chatGPTAccountUsage } from '../../electron/backend/chat/quota';
-import { apiProviderIds, type ApiProvider } from '../../electron/contracts/apiConnections';
 import { useGeneralSettings } from '../../src/stores/generalSettings';
 import { t } from '../../src/i18n';
 beforeEach(() => useGeneralSettings.setState({ language: 'zh-CN' }));
@@ -11,6 +10,9 @@ const fixture = vi.hoisted(() => ({
   usage: null as any,
   loading: false,
   error: null as string | null,
+  user: { id: 'synthetic', name: '', email: '' },
+  accounts: [] as ('chatgpt' | 'copilot')[],
+  accountUsers: {} as Record<string, { name: string; email: string }>,
 }));
 vi.mock('../../src/stores/chatConnection', () => ({
   useChatConnection: () => ({
@@ -18,11 +20,23 @@ vi.mock('../../src/stores/chatConnection', () => ({
     loadingUsage: fixture.loading,
     usageError: fixture.error,
     refreshUsage: vi.fn(),
+    savedUsage: {},
   }),
 }));
 vi.mock('../../src/stores/auth', () => ({
-  useAuth: (select: any) => select({ session: { mode: fixture.mode, user: { id: 'synthetic' } } }),
+  useAuth: (select?: (value: unknown) => unknown) => {
+    const state = {
+      session: { mode: fixture.mode, user: fixture.user },
+      accounts: fixture.accounts,
+      accountUsers: fixture.accountUsers,
+      accountsLoaded: true,
+      loadAccounts: vi.fn(),
+      resolved: true,
+    };
+    return select ? select(state) : state;
+  },
 }));
+import { AIServicePanel } from '../../src/components/AIServicePanel';
 import { UsagePanel } from '../../src/components/UsagePanel';
 import { AccountUsageSummary, InterviewApiBillingRow } from '../../src/components/AccountUsageSummary';
 afterEach(() => {
@@ -30,22 +44,44 @@ afterEach(() => {
   fixture.usage = null;
   fixture.loading = false;
   fixture.error = null;
+  fixture.user = { id: 'synthetic', name: '', email: '' };
+  fixture.accounts = [];
+  fixture.accountUsers = {};
   vi.useRealTimers();
 });
-it.each(['zh-CN', 'en'] as const)('开始面试按当前 API 服务商显示计费方式：%s', language => {
+it.each(['zh-CN', 'en'] as const)('开始面试按当前 API 服务商显示余额或计费方式：%s', language => {
   useGeneralSettings.setState({ language });
-  const names: Record<ApiProvider, [string, string]> = {
-    openai: ['OpenAI', 'OpenAI'], anthropic: ['Claude', 'Claude'], gemini: ['Gemini', 'Gemini'],
-    qwen: ['通义千问', 'Qwen'], deepseek: ['DeepSeek', 'DeepSeek'], kimi: ['Kimi', 'Kimi'],
-    glm: ['智谱 GLM', 'Zhipu GLM'], doubao: ['豆包', 'Doubao'],
-  };
-  for (const provider of apiProviderIds) {
-    const [zh, en] = names[provider];
-    const row = renderToStaticMarkup(<InterviewApiBillingRow provider={provider} />);
-    expect(row).toBe(language === 'en'
-      ? `<div><dt>AI service usage</dt><dd>${en} API billing</dd></div>`
-      : `<div><dt>AI服务用量</dt><dd>${zh} API计费</dd></div>`);
-  }
+  const balances = [{ currency: 'USD', total: '0.00' }, { currency: 'CNY', total: '12.34' }];
+  const row = renderToStaticMarkup(<InterviewApiBillingRow provider="openai" />);
+  expect(row).toBe(language === 'en'
+    ? '<div><dt>OpenAI API</dt><dd>API billing</dd></div>'
+    : '<div><dt>OpenAI API</dt><dd>API计费</dd></div>');
+  const deepSeek = renderToStaticMarkup(<InterviewApiBillingRow provider="deepseek" balances={balances} />);
+  expect(deepSeek).toContain('<dt>DeepSeek API</dt>');
+  expect(deepSeek).toContain(language === 'en' ? '12.34 CNY remaining' : '剩余 12.34 CNY');
+  expect(deepSeek).not.toContain('0.00 USD');
+});
+it('没有余额信息时显示API计费，真实零余额仍显示额度', () => {
+  const status = (balances?: { currency: string; total: string }[] | null) =>
+    renderToStaticMarkup(<InterviewApiBillingRow provider="deepseek" balances={balances} />);
+  expect(status()).toContain('API计费');
+  expect(status(null)).toContain('API计费');
+  expect(status([])).toContain('API计费');
+  expect(status([{ currency: 'CNY', total: '0.00' }])).toContain('剩余 0.00 CNY');
+});
+it('账号身份优先显示邮箱，否则显示用户名，并保留未启用账号身份', () => {
+  fixture.mode = 'copilot';
+  fixture.user.name = 'synthetic-github';
+  fixture.accounts = ['chatgpt', 'copilot'];
+  fixture.accountUsers.chatgpt = { name: 'Synthetic ChatGPT', email: 'synthetic@example.test' };
+  let html = renderToStaticMarkup(<AIServicePanel />);
+  expect(html).toContain('synthetic-github');
+  expect(html).toContain('synthetic@example.test');
+  expect(html).not.toContain('当前使用中');
+  fixture.user.email = 'github@example.test';
+  html = renderToStaticMarkup(<AIServicePanel />);
+  expect(html).toContain('github@example.test');
+  expect(html).not.toContain('synthetic-github');
 });
 it.each(['zh-CN', 'en'] as const)('额度错误去重并保留读屏提示与其他错误：%s', language => {
   useGeneralSettings.setState({ language });
@@ -123,7 +159,7 @@ it('ChatGPT返回两窗显示两窗，仅周则不生成五小时卡片', () => 
   expect(fixture.usage.quotas[0].label).toBe('每周额度');
   expect(html).toContain('5小时额度');
   expect(html).toContain('每周额度');
-  expect(html).toContain('ChatGPT Plus');
+  expect(html).toContain('<strong>ChatGPT Plus额度</strong>');
   expect(html).toContain('剩余 80%');
   expect(html).not.toMatch(/20%|40%|<dt>已用/);
   expect(html).not.toMatch(/AI Credits|计量单位|查询时间/);
@@ -224,20 +260,29 @@ it('五小时窗口显示小时与分钟，并保留不足一小时的分钟数'
   }
 });
 
-it('Pro官方变体显示Pro，未知套餐仅显示ChatGPT，预览不作为真实套餐来源', () => {
+it.each(['zh-CN', 'en'] as const)('套餐与额度合并为标题，未知套餐不推断计划：%s', (language) => {
+  useGeneralSettings.setState({ language });
   fixture.mode = 'chatgpt';
   for (const planType of ['prolite', 'promax']) {
     fixture.usage = chatGPTAccountUsage({
       rateLimits: { planType, secondary: { usedPercent: 45, windowDurationMins: 10080 } },
     });
-    expect(renderToStaticMarkup(<UsagePanel />)).toContain('ChatGPT Pro');
+    expect(renderToStaticMarkup(<UsagePanel />)).toContain(
+      `<strong>ChatGPT Pro${language === 'en' ? ' usage' : '额度'}</strong>`,
+    );
   }
   fixture.usage = chatGPTAccountUsage({
     rateLimits: { secondary: { usedPercent: 45, windowDurationMins: 10080 } },
   });
   const html = renderToStaticMarkup(<UsagePanel />);
-  expect(html).toContain('class="account-quota-plan">ChatGPT</span>');
+  expect(html).toContain(`<strong>ChatGPT${language === 'en' ? ' usage' : '额度'}</strong>`);
+  expect(html).not.toContain('account-quota-plan');
   expect(html).not.toMatch(/ChatGPT Pro|ChatGPT Plus|ChatGPT Free/);
+  fixture.mode = 'copilot';
+  fixture.usage = copilotAccountUsage({ planTier: 'edu' });
+  expect(renderToStaticMarkup(<UsagePanel />)).toContain(language === 'en'
+    ? '<strong>Copilot student/education plan usage</strong>'
+    : '<strong>Copilot 学生/教育计划额度</strong>');
 });
 
 it.each(
@@ -288,4 +333,26 @@ it('a low weekly period preserves the expanded two-period sidebar and healthy fi
   expect(html).toContain('class="account-usage-value">5小时 71%</span>');
   expect(html).toContain('class="account-usage-value is-low">每周 19%</span>');
   expect(html).not.toContain('account-usage-percent');
+});
+
+it.each(['chatgpt', 'copilot'] as const)('shows the account quota inside only the connected %s group', (mode) => {
+  fixture.mode = mode;
+  fixture.usage = mode === 'chatgpt'
+    ? chatGPTAccountUsage({ rateLimits: { primary: { usedPercent: 41, windowDurationMins: 300 } } })
+    : copilotAccountUsage({
+        snapshots: { chat: { entitlementRequests: 100, usedRequests: 41, remainingPercentage: 59 } },
+      });
+  const html = renderToStaticMarkup(<AIServicePanel />);
+  const parts = html.split('<section class="usage-panel settings-usage"');
+  expect(parts).toHaveLength(2);
+  const [before, after] = parts;
+  const other = mode === 'chatgpt' ? 'copilot' : 'chatgpt';
+  expect(before.lastIndexOf(`data-settings-target="${mode}"`)).toBeGreaterThan(
+    before.lastIndexOf(`data-settings-target="${other}"`),
+  );
+  expect(before).toContain(`aria-controls="account-settings-${mode}"`);
+  expect(before).toContain('aria-expanded="true"');
+  expect(before).toContain('禁用</button>');
+  expect(after).toContain('剩余 59%');
+  expect(html).toContain('未登录');
 });

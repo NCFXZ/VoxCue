@@ -1,15 +1,28 @@
 import type { AccountUsage } from '../../electron/contracts/accountUsage';
-import { apiProviders, type ApiProvider } from '../../electron/contracts/apiConnections';
+import { apiProviders, type ApiBalance, type ApiProvider } from '../../electron/contracts/apiConnections';
 import { Fragment } from 'react';
 import { t } from '../i18n';
 import { accountUsageSummaryParts } from '../services/accountUsageSummary';
 
-export function InterviewApiBillingRow({ provider }: { provider: ApiProvider }) {
-  const name = t(apiProviders[provider].name).replace(/ API$/, '');
+export function InterviewApiBillingRow({
+  provider,
+  balances,
+}: {
+  provider: ApiProvider;
+  balances?: readonly ApiBalance[] | null;
+}) {
+  const name = t(apiProviders[provider].name).replace(/ API$/, '') + ' API';
+  let label = t('API计费');
+  if (balances?.length) {
+    const nonzero = balances.filter(({ total }) => Number(total) !== 0);
+    const amount = (nonzero.length ? nonzero : balances)
+      .map(({ currency, total }) => `${total} ${currency}`).join(' · ');
+    label = t('剩余 {0}', [amount]);
+  }
   return (
     <div>
-      <dt>{t('AI服务用量')}</dt>
-      <dd>{t('{0} API计费', [name])}</dd>
+      <dt>{name}</dt>
+      <dd aria-live={provider === 'deepseek' ? 'polite' : undefined}>{label}</dd>
     </div>
   );
 }

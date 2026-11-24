@@ -51,6 +51,8 @@ if (suites[0] === '--dpi') {
     'local-mode',
     'telemetry',
     'settings',
+    'settings-location',
+    'announcement-ui',
     'shortcut-settings',
     'interview-badge-layout',
     'interview-shortcuts',
@@ -222,11 +224,11 @@ try {
     let output = '';
     child.stdout.on('data', (data) => {
       output += data;
-      if (!windowsOnly) process.stdout.write(data);
+      if (!windowsOnly || args[0].endsWith('/components-native-smoke.mjs')) process.stdout.write(data);
     });
     child.stderr.on('data', (data) => {
       output += data;
-      if (!windowsOnly) process.stderr.write(data);
+      if (!windowsOnly || args[0].endsWith('/components-native-smoke.mjs')) process.stderr.write(data);
     });
     // The shared runner bounds each suite, including a 10-minute soak.
     // Its outer watchdog must allow the complete serial matrix to finish.

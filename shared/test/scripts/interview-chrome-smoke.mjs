@@ -7,6 +7,7 @@ import {
   connectUiAccount,
   focusUiWindow,
   installUiAccount,
+  showInterviewWindow,
 } from './install-ui-account.mjs';
 import { captureRequested } from './capture-requested.mjs';
 import {
@@ -182,7 +183,7 @@ try {
   assert.equal(composerType.input, 14);
   assert.deepEqual(composerType.controls, [12, 12, 12]);
   assert.ok(composerType.controls.every((size) => size <= composerType.input));
-  await click(floating.getByRole('button', { name: '关闭截图保护', exact: true }));
+  await showInterviewWindow(floating, click);
   await floating.locator('.floating-capture-notice').waitFor();
   assert.equal(
     (await material(floating.locator('.floating-capture-notice'))).filter,

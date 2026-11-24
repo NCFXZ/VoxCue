@@ -10,8 +10,11 @@ import {
 } from '../../../shared/electron/backend/updates/releases';
 import {
   platformReleaseProvider,
+  fetchPlatformUpdate,
   type ReleaseFetch,
 } from '../../../shared/electron/backend/updates/provider';
+import { cnbReleaseIndex, regionLookup } from '../../electron/backend/downloads';
+import { validatePlatformUpdate } from '../../electron/backend/updates/cache';
 
 const checksum = Buffer.alloc(64, 7).toString('base64');
 function release(
@@ -57,7 +60,8 @@ function provider(
   fetcher: ReleaseFetch,
   controller = new AbortController(),
 ) {
-  const Provider = platformReleaseProvider(target, controller.signal, fetcher);
+  const Provider = platformReleaseProvider(target, controller.signal, (input, init) =>
+    String(input) === regionLookup ? Promise.resolve(new Response('loc=GB\n')) : fetcher(input, init));
   return {
     controller,
     instance: new Provider({}, {} as any, {
@@ -69,6 +73,46 @@ function provider(
 }
 
 describe('按平台独立选择正式更新', () => {
+  it('大陆通过公开索引发现未来新版，按平台筛选且全部下载继续走 CNB', async () => {
+    const requests: string[] = [];
+    const fetcher: ReleaseFetch = async (input, init) => {
+      const url = String(input);
+      requests.push(url);
+      expect(init?.credentials).toBe('omit');
+      if (url === regionLookup) return new Response('colo=LHR\nloc=CN\n');
+      if (url === cnbReleaseIndex) return new Response(JSON.stringify({ schemaVersion: 1, releases: [
+        release('1.3.3'), release('1.3.10'), release('2.0.0', 'macos-arm64'),
+        release('3.0.0', 'windows-x64', { prerelease: true }),
+        release('4.0.0', 'windows-x64', { assets: [] }),
+      ] }));
+      expect(url).toBe('https://cnb.cool/voxcue-release/voxcue-release/-/releases/download/windows-x64-v1.3.10/latest.yml');
+      return new Response(JSON.stringify(manifest('1.3.10')));
+    };
+    const Provider = platformReleaseProvider('windows-x64', new AbortController().signal, fetcher);
+    const instance = new Provider({}, {} as any, { executor: {} as any, platform: 'win32', isUseMultipleRangeRequest: false });
+    const remote = await instance.getLatestVersion();
+    const cached = validatePlatformUpdate(JSON.parse(JSON.stringify(remote)), 'windows-x64');
+    expect(cached.version).toBe('1.3.10');
+    expect(cached.selectedRelease.source).toBe('cnb');
+    expect(instance.resolveFiles(cached)[0].url.href).toBe(
+      'https://cnb.cool/voxcue-release/voxcue-release/-/releases/download/windows-x64-v1.3.10/VoxCue-Setup-1.3.10-x64.exe');
+    expect(requests).toHaveLength(3);
+    expect(requests.some(url => /api\.cnb|github/.test(url))).toBe(false);
+    expect(() => validatePlatformUpdate({ ...cached, selectedRelease: { ...cached.selectedRelease, source: 'https://evil.test' } }, 'windows-x64')).toThrow('download source');
+  });
+  it('大陆索引损坏、缺少平台资产或清单不匹配时拒绝，不静默降级到旧版或跨源', async () => {
+    for (const index of [null, { schemaVersion: 2, releases: [] },
+      { schemaVersion: 1, releases: [release('1.3.3', 'macos-arm64')] },
+      { schemaVersion: 1, releases: [release('1.3.3')] }]) {
+      const requests: string[] = [];
+      await expect(fetchPlatformUpdate('windows-x64', new AbortController().signal, async input => {
+        const url = String(input);
+        requests.push(url);
+        return new Response(url === regionLookup ? 'loc=CN' : JSON.stringify(url === cnbReleaseIndex ? index : manifest('1.3.2')));
+      })).rejects.toThrow();
+      expect(requests.some(url => /github/.test(url))).toBe(false);
+    }
+  });
   it('仅支持Windows x64与Mac原生arm64，拒绝Intel Mac/其他架构', () => {
     expect(releaseTarget('win32', 'x64')).toBe('windows-x64');
     expect(releaseTarget('darwin', 'arm64')).toBe('macos-arm64');

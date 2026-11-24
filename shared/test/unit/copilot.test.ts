@@ -685,6 +685,39 @@ describe('Copilot 服务适配与本机资料边界', () => {
     });
     expect(client.deleteSession).toHaveBeenCalledWith('owned-session');
   });
+  it('Copilot 提案误把技能范围和来源清单写进 changes 时仍可保存，其他未知字段按名称报错', async () => {
+    const profile = { name: '', background: '已确认简历', jobDescription: '已确认 JD' };
+    const skills = [{ id: 'skill', title: '核心技能', content: '精简技能说明', sources: [] }];
+    const nested = JSON.stringify({ answer: '请确认提案', changes: { skills, skillScope: 'all', sources: [] } });
+    const accepted = await chat((emit) => answer(emit, nested)).service.stream(
+      { ...request, profile }, () => {}, new AbortController().signal,
+    );
+    expect(accepted.profileChanges).toEqual({ skills });
+    const unknown = JSON.stringify({ answer: '请确认提案', changes: { targetRole: '硬件工程师' }, skillScope: null });
+    await expect(chat((emit) => answer(emit, unknown)).service.stream(
+      { ...request, profile }, () => {}, new AbortController().signal,
+    )).rejects.toThrow('资料更新包含未知字段：targetRole。');
+    expect(profile.jobDescription).toBe('已确认 JD');
+  });
+  it('Copilot 技能缺少来源或 id 不规范时修正后可保存，正文问题按技能报错', async () => {
+    const profile = { name: '', background: '已确认简历', jobDescription: '已确认 JD' };
+    const skills = [
+      { id: '机器人闭环控制', title: '机器人闭环控制与硬件集成', content: '岗位相关重点' },
+      { id: 'embedded', title: '嵌入式运动控制', content: '岗位相关重点二', sources: null },
+    ];
+    const content = JSON.stringify({ answer: '请确认提案', changes: { skills }, skillScope: 'all' });
+    const accepted = await chat((emit) => answer(emit, content)).service.stream(
+      { ...request, profile }, () => {}, new AbortController().signal,
+    );
+    expect(accepted.profileChanges?.skills).toEqual([
+      { id: 'skill-1', title: '机器人闭环控制与硬件集成', content: '岗位相关重点', sources: [] },
+      { id: 'embedded', title: '嵌入式运动控制', content: '岗位相关重点二', sources: [] },
+    ]);
+    const empty = JSON.stringify({ answer: '请确认提案', changes: { skills: [{ ...skills[1], content: '' }] }, skillScope: 'all' });
+    await expect(chat((emit) => answer(emit, empty)).service.stream(
+      { ...request, profile }, () => {}, new AbortController().signal,
+    )).rejects.toThrow('技能「嵌入式运动控制」的正文为空或超过 6000 个字符，未修改个人信息。');
+  });
   it('结构化资料完整校验后才返回提案；只认实际搜索工具提供的来源', async () => {
     const profile = { name: '', background: '已确认简历', jobDescription: '已确认 JD', skills: [] };
     const changes = {

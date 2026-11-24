@@ -1,8 +1,8 @@
 import { constants } from 'node:fs';
-import { lstat, mkdir, open, readdir, realpath, rm } from 'node:fs/promises';
+import { lstat, mkdir, open, readdir, realpath, rm, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import {
-  apiProviderIds, isApiProvider, parseApiConnectionConfig,
+  apiProviderIds, isApiProvider, retiredApiProviderIds,
   type ApiConnectionConfig, type ApiProvider,
 } from '../../contracts/apiConnections';
 import { storedProfileDirectories } from '../storedProfileDirectories';
@@ -19,6 +19,30 @@ function checkKey(value: unknown): asserts value is string {
   if (typeof value !== 'string' || !/^[!-~]{1,4096}$/.test(value)) throw new InvalidApiCredential();
 }
 
+const credentialFilename = (provider: ApiProvider) => `${provider}.json`;
+const credentialDirectory = (root: string) => path.join(root, 'auth-data', 'api-keys');
+const retiredCredentialFilenames = new Set([
+  ...retiredApiProviderIds.map((provider) => `${provider}.json`),
+  'qwen-ai-payg.json',
+]);
+
+function ignoreMissing(error: NodeJS.ErrnoException) {
+  if (error.code !== 'ENOENT') throw error;
+}
+
+async function apiKeyFiles(directory: string) {
+  for (const candidate of [path.dirname(directory), directory]) {
+    const stat = await lstat(candidate).catch(ignoreMissing);
+    if (!stat) return [];
+    if (!stat.isDirectory() || await realpath(candidate) !== candidate)
+      throw new InvalidApiCredential();
+  }
+  return readdir(directory, { withFileTypes: true }).catch((error: NodeJS.ErrnoException) => {
+    ignoreMissing(error);
+    return [];
+  });
+}
+
 /** Public settings are readable without opening the OS vault; a second, encrypted copy
  * binds every key to its destination so editing metadata cannot redirect a credential. */
 export class ApiCredentialStore {
@@ -27,12 +51,12 @@ export class ApiCredentialStore {
   private writes = Promise.resolve();
 
   constructor(root: string, private encryption: CredentialEncryption = systemCredentialEncryption) {
-    this.directory = path.join(root, 'auth-data', 'api-keys');
+    this.directory = credentialDirectory(root);
   }
 
   private file(provider: ApiProvider) {
     if (!isApiProvider(provider)) throw new InvalidApiCredential();
-    return path.join(this.directory, provider + '.json');
+    return path.join(this.directory, credentialFilename(provider));
   }
 
   private async envelope(provider: ApiProvider) {
@@ -52,9 +76,10 @@ export class ApiCredentialStore {
     }
     try {
       const value = JSON.parse(contents);
-      if (value?.version !== 1 || value.config?.provider !== provider ||
+      const config = { provider };
+      if (value?.version !== 1 || JSON.stringify(value.config) !== JSON.stringify(config) ||
           typeof value.ciphertext !== 'string' || !value.ciphertext) throw new InvalidApiCredential();
-      return { config: parseApiConnectionConfig(value.config), ciphertext: value.ciphertext as string };
+      return { config, ciphertext: value.ciphertext as string };
     } catch {
       throw new InvalidApiCredential();
     }
@@ -64,7 +89,7 @@ export class ApiCredentialStore {
     await this.writes;
     const entries = await Promise.all(apiProviderIds.map(async (provider) => {
       try {
-        return (await this.envelope(provider))?.config;
+        return await this.envelope(provider) ? { provider } : undefined;
       } catch (error) {
         // Keep a damaged entry visible for replacement/removal without hiding other providers.
         if (error instanceof InvalidApiCredential) return { provider };
@@ -85,8 +110,7 @@ export class ApiCredentialStore {
     try { data = JSON.parse(decrypted); } catch { throw new InvalidApiCredential(); }
     if (JSON.stringify(data?.config) !== JSON.stringify(entry.config)) throw new InvalidApiCredential();
     checkKey(data?.key);
-    const { region, workspace } = entry.config;
-    return { key: data.key, region, workspace };
+    return { key: data.key };
   }
 
   private change(operation: () => Promise<void>) {
@@ -103,17 +127,14 @@ export class ApiCredentialStore {
     return this.change(async () => {
       active.throwIfAborted();
       checkKey(credential.key);
-      const config = parseApiConnectionConfig({
-        provider,
-        ...(credential.region === undefined ? {} : { region: credential.region }),
-        ...(credential.workspace === undefined ? {} : { workspace: credential.workspace }),
-      });
+      const file = this.file(provider);
+      const config = { provider };
       const encrypted = await this.encryption.encrypt(JSON.stringify({ config, key: credential.key }));
       active.throwIfAborted();
       const value = JSON.stringify({ version: 1, config, ciphertext: encrypted.toString('base64') });
       if (Buffer.byteLength(value) > limit) throw new InvalidApiCredential();
       await mkdir(this.directory, { recursive: true, mode: 0o700 });
-      await atomicFile(this.file(provider), value, active);
+      await atomicFile(file, value, active);
     });
   }
 
@@ -127,25 +148,37 @@ export class ApiCredentialStore {
   }
 }
 
+/** Remove only known retired credentials from local VoxCue profiles at startup. */
+export async function removeRetiredApiKeyRecords(root: string) {
+  let incomplete = false;
+  for await (const profile of storedProfileDirectories(root)) {
+    const directory = credentialDirectory(profile);
+    const files = await apiKeyFiles(directory).catch(() => {
+      incomplete = true;
+      return [];
+    });
+    for (const file of files) {
+      if (!retiredCredentialFilenames.has(file.name)) continue;
+      if (!file.isFile()) {
+        incomplete = true;
+        continue;
+      }
+      await unlink(path.join(directory, file.name)).catch((error: NodeJS.ErrnoException) => {
+        if (error.code !== 'ENOENT') incomplete = true;
+      });
+    }
+  }
+  if (incomplete) throw new InvalidApiCredential();
+}
+
 // Verify inactive accounts as well as the current one before retiring a historical system key.
 export async function readApiKeyRecords(root: string, decrypt: (value: Buffer) => Promise<string>) {
   let found = false;
   for await (const profile of storedProfileDirectories(root)) {
-    const directory = path.join(profile, 'auth-data', 'api-keys');
-    for (const candidate of [path.dirname(directory), directory]) {
-      const stat = await lstat(candidate).catch((error: NodeJS.ErrnoException) => {
-        if (error.code !== 'ENOENT') throw error;
-      });
-      if (stat && (!stat.isDirectory() || await realpath(candidate) !== candidate))
-        throw new InvalidApiCredential();
-    }
-    const files = await readdir(directory, { withFileTypes: true }).catch((error: NodeJS.ErrnoException) => {
-      if (error.code !== 'ENOENT') throw error;
-      return [];
-    });
     const store = new ApiCredentialStore(profile);
-    for (const file of files) {
-      const provider = apiProviderIds.find(id => file.name === id + '.json');
+    for (const file of await apiKeyFiles(credentialDirectory(profile))) {
+      const provider = apiProviderIds.find(id => file.name === credentialFilename(id));
+      // Keep historical OS keys if an inactive record would otherwise go unchecked.
       if (!file.isFile() || !provider || !(await store.read(provider, decrypt)))
         throw new InvalidApiCredential();
       found = true;

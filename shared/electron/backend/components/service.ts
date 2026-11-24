@@ -11,6 +11,7 @@ import {
 import type { ComponentPackage, ComponentArchive } from './catalog';
 import { unpackComponentFile } from './archive';
 import { componentLeaseAbsent, holdComponentLease, validComponentLease } from './lease';
+import { downloadUrl, type DownloadSource } from '../downloads';
 
 export function componentLocation(root: string, pkg: ComponentPackage) {
   return path.join(root, `${pkg.id}-${pkg.version}-${pkg.sha256}`);
@@ -42,6 +43,7 @@ export class ComponentService {
       managed: boolean;
       managedIds?: ComponentId[];
       fetch: typeof fetch;
+      source?(signal: AbortSignal): Promise<DownloadSource>;
       emit(state: ComponentState): void;
       prepareRemove?(id: ComponentId): Promise<boolean>;
     },
@@ -198,6 +200,7 @@ export class ComponentService {
         await this.check(id);
       } else await this.status();
       signal.throwIfAborted();
+      let source: DownloadSource | undefined;
       for (const pkg of this.options.packages) {
         if (
           !this.managed(pkg.id) ||
@@ -207,7 +210,8 @@ export class ComponentService {
         )
           continue;
         signal.throwIfAborted();
-        await this.install(pkg, signal);
+        source ??= await this.options.source?.(signal) ?? 'github';
+        await this.install(pkg, signal, source);
       }
       this.publish(this.requiredReady() ? 'ready' : 'needed');
     } catch {
@@ -295,7 +299,7 @@ export class ComponentService {
       (name) => name === 'files' || name === '.voxcue-component.json',
     );
   }
-  private async install(pkg: ComponentPackage, signal: AbortSignal) {
+  private async install(pkg: ComponentPackage, signal: AbortSignal, source: DownloadSource) {
     const item = this.value.items.find((value) => value.id === pkg.id)!;
     const stage = path.join(this.options.root, '.stage-' + pkg.id + '-' + randomUUID());
     const next = path.join(stage, 'next');
@@ -320,7 +324,7 @@ export class ComponentService {
       for (const [index, part] of (pkg.parts ?? [pkg]).entries()) {
         const archive = path.join(stage, `download-${index}.zip`);
         item.phase = 'downloading';
-        await this.downloadArchive(part, archive, signal, (received) => {
+        await this.downloadArchive(part, archive, source, signal, (received) => {
           item.received = completed + received;
           this.publish('downloading');
         });
@@ -409,6 +413,7 @@ export class ComponentService {
   private async downloadArchive(
     pkg: ComponentArchive,
     file: string,
+    source: DownloadSource,
     signal: AbortSignal,
     progress: (bytes: number) => void,
   ) {
@@ -430,8 +435,8 @@ export class ComponentService {
     };
     combined.addEventListener('abort', abort, { once: true });
     try {
-      const url = `https://github.com/NCFXZ/VoxCue/releases/download/${pkg.tag}/${pkg.asset}`;
-      const response = await this.options.fetch(url, {
+      const url = downloadUrl(source, pkg.tag, pkg.asset);
+      const response = await this.options.fetch(url.href, {
         signal: combined,
         credentials: 'omit',
         redirect: 'follow',

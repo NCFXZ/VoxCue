@@ -16,6 +16,19 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
+it.each(['chatgpt', 'copilot'] as const)('blocks a disabled %s before contacting its credential runtime', async service => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'voxcue-disabled-service-'));
+  roots.push(root);
+  const profile = apiProfile(root, 'local');
+  try {
+    await profile.selection.set(service, false);
+    const access = vi.spyOn(service === 'chatgpt' ? profile.auth : profile.copilotAuth, 'access');
+    expect(() => profile.chat.models()).toThrow('请先连接 AI 服务。');
+    expect(() => profile.chat.accountUsage()).toThrow('请先连接 AI 服务。');
+    expect(access).not.toHaveBeenCalled();
+  } finally { await profile.dispose(); }
+});
+
 it('keeps native images and provider connections separate across A, B and local sessions, including restart', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'voxcue-account-profile-'));
   roots.push(root);
@@ -126,10 +139,10 @@ it('routes a saved API key after restart and retains it on disconnect only in it
   roots.push(root);
   const http = vi.fn<typeof fetch>(async (url, options) => {
     expect(new Headers(options?.headers).get('authorization')).toBe('Bearer synthetic-owner-only');
-    if (String(url) === 'https://api.moonshot.cn/v1/models') return Response.json({ data: [{ id: 'kimi-k3' }] });
-    expect(String(url)).toBe('https://api.moonshot.cn/v1/chat/completions');
+    if (String(url) === 'https://api.deepseek.com/models') return Response.json({ data: [{ id: 'deepseek-flash', effort: { supported_levels: ['high'] } }] });
+    expect(String(url)).toBe('https://api.deepseek.com/chat/completions');
     const body = JSON.parse(String(options?.body));
-    expect(body).toMatchObject({ model: 'kimi-k3', stream: true, reasoning_effort: 'high' });
+    expect(body).toMatchObject({ model: 'deepseek-flash', stream: true, reasoning_effort: 'high' });
     return new Response('data: ' + JSON.stringify({ id: 'fixture-answer',
       choices: [{ delta: { content: '合成回答' }, finish_reason: 'stop' }],
       usage: { prompt_tokens: 8, completion_tokens: 2, total_tokens: 10 } }) + '\n\ndata: [DONE]\n\n');
@@ -140,26 +153,26 @@ it('routes a saved API key after restart and retains it on disconnect only in it
     const original = apiProfile(root, 'local');
     profiles.push(original);
     await original.selection.ready;
-    await original.api.configure({ provider: 'kimi' }, async () => 'synthetic-owner-only', vi.fn(), new AbortController().signal);
+    await original.api.configure({ provider: 'deepseek' }, async () => 'synthetic-owner-only', vi.fn(), new AbortController().signal);
     expect(original.selection.service).toBe('chatgpt');
-    await original.selection.set('kimi', true);
+    await original.selection.set('deepseek', true);
     await original.dispose();
     profiles.pop();
     const restored = apiProfile(root, 'local');
     const other = apiProfile(root, 'account:' + randomUUID());
     profiles.push(restored, other);
     const session = await restored.selection.session('startup', (id) => restored.session(id));
-    expect(session?.mode).toBe('kimi');
+    expect(session?.mode).toBe('deepseek');
     expect(await other.api.list()).toEqual([]);
     const result = await restored.ragChat.stream({
-      id: 'synthetic', modelId: 'kimi-k3', effort: 'high', webSearch: false,
+      id: 'synthetic', modelId: 'deepseek-flash', effort: 'high', webSearch: false,
       instructions: '', turns: [{ role: 'user', content: 'hello' }],
     }, vi.fn(), new AbortController().signal);
     expect(result.answerText).toBe('合成回答');
-    expect(result.provider?.id).toBe('kimi');
+    expect(result.provider?.id).toBe('deepseek');
     expect(await restored.chat.usage()).toMatchObject({ requests: 1, totalTokens: 10 });
-    await restored.selection.set('kimi', false);
-    expect(await restored.api.list()).toEqual([{ provider: 'kimi' }]);
+    await restored.selection.set('deepseek', false);
+    expect(await restored.api.list()).toEqual([{ provider: 'deepseek' }]);
     expect(() => restored.chat.models()).toThrow('请先连接');
   } finally {
     await Promise.all(profiles.map((profile) => profile.dispose()));
@@ -183,18 +196,9 @@ it('switches preparation and interview requests across saved API providers with 
       http.mockImplementation(send);
       expect(await profile.api.configure({ provider }, async () => key, vi.fn(), signal)).toBe(true);
       await profile.selection.set(provider, true);
-      // Initially the vendor lists a single model. Its second model becomes
-      // visible upstream while the first catalog is still cached.
       http.mockImplementationOnce(async (url, options) => {
         const page = await (await send(url, options)).json();
-        if (provider === 'qwen') {
-          page.output.models = page.output.models.slice(0, 1);
-          page.output.total = 1;
-        } else {
-          const field = provider === 'gemini' ? 'models' : 'data';
-          page[field] = page[field].slice(0, 1);
-        }
-        return Response.json(page);
+        return Response.json({ data: page.data.slice(0, 1) });
       });
       const initial = await profile.ragChat.models();
       expect(initial).toHaveLength(1);
@@ -203,7 +207,7 @@ it('switches preparation and interview requests across saved API providers with 
       expect(http).toHaveBeenCalledTimes(beforeRefresh);
       const refreshed = await profile.ragChat.models(true);
       expect(http).toHaveBeenCalledTimes(beforeRefresh + 1);
-      const model = refreshed.find((entry) => entry.id !== initial[0].id)!;
+      const model = refreshed.find(entry => entry.id !== initial[0].id)!;
       expect(model.provider?.id).toBe(provider);
       expect((await profile.chat.usage()).requests).toBe(0);
 

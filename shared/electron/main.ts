@@ -1,4 +1,4 @@
-import { readApiKeyRecords } from './backend/api/credentials';
+import { readApiKeyRecords, removeRetiredApiKeyRecords } from './backend/api/credentials';
 import { createAccountProfile, waitForProfileCleanup } from './accountProfile';
 import { hasChromiumAppStorage, LegacyProfileClaim, LegacyProfileMigrationError, legacyProfileAssignmentFile } from './backend/legacyProfileClaim';
 import { eraseLegacyProfileFiles, hasLegacyProfileFiles, migrateLegacyProfileFiles } from './backend/legacyProfileFiles';
@@ -8,6 +8,8 @@ import { UpdateService } from './backend/updates/service';
 import { readAutoDownload, saveAutoDownload } from './backend/updates/preferences';
 import { createUpdateDriver, updateUnavailableReason } from './backend/updates/driver';
 import { registerUpdateIpc } from './ipc/updates';
+import { AnnouncementService } from './backend/announcements';
+import { registerAnnouncementIpc } from './ipc/announcements';
 import {
   credentialRetainedItemNames,
   type CredentialCleanup,
@@ -35,6 +37,7 @@ import { encodeScreenshotBitmap } from './backend/screenshot/host';
 import { runtimeEnvironment, restrictSessionPermissions } from './runtimePolicy';
 import { packagesFor } from './backend/components/catalog';
 import { ComponentService, componentPaths } from './backend/components/service';
+import { resolveDownloadSource } from './backend/downloads';
 import { registerComponentIpc } from './ipc/components';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -61,7 +64,7 @@ import { ProfileMoveReceipts } from './backend/profileMoveReceipt';
 import { checkOrRemoveMovedProfileAssets } from './movedProfileAssets';
 import { openProfileImportSource } from './profileImportSource';
 import { accountErasureMarker, eraseLocalAccount } from './backend/accountErasure';
-import { providerCredentialMessages, type AIService } from './contracts/auth';
+import { providerCredentialMessages, type AccountService, type AIService } from './contracts/auth';
 import { SelectedChatService } from './application/providers';
 import { registerChatIpc } from './ipc/chat';
 import { registerApiConnectionIpc } from './ipc/apiConnections';
@@ -156,6 +159,7 @@ let remoteInterview: RemoteInterviewCoordinator | undefined;
 let remotePresentationRevision = 0;
 let historyJobs: ReturnType<typeof registerHistoryIpc> | undefined;
 let updates: UpdateService | undefined;
+let announcements: AnnouncementService | undefined;
 let updatesClosed = false;
 let updatesClosing = false;
 let components: ComponentService;
@@ -1239,6 +1243,9 @@ app.whenReady().then(async () => {
       return;
     }
   }
+  await removeRetiredApiKeyRecords(userData).catch(() => {
+    console.error('Retired API key cleanup incomplete.');
+  });
   async function loadNativePreferences(owner: string) {
     const root = profileDirectory(app.getPath('userData'), owner);
     const shortcutFile = path.join(root, 'shortcut-settings.json');
@@ -1258,12 +1265,15 @@ app.whenReady().then(async () => {
     desktopPlatform.id,
     resources.qwenRuntime,
   );
+  const componentFetch: typeof fetch = (url, options) =>
+    session.fromPartition('voxcue-components').fetch(String(url), options);
   components = new ComponentService({
     root: componentRoot,
     packages: packagesFor(process.platform, process.arch),
     managed: managedComponents,
     managedIds: ['qwen'],
-    fetch: (url, options) => session.fromPartition('voxcue-components').fetch(String(url), options),
+    fetch: componentFetch,
+    source: signal => resolveDownloadSource(componentFetch, signal),
     emit(state) {
       for (const win of [mainWindow, loginWindow, interviewWindow])
         if (win && !win.isDestroyed()) sendDesktop(win.webContents, 'components:event', state);
@@ -1892,6 +1902,8 @@ app.whenReady().then(async () => {
     },
   });
   registerUpdateIpc(updates, requireMain);
+  announcements = new AnnouncementService(app.getVersion());
+  registerAnnouncementIpc(announcements, requireMain, () => isCloudProfileOwner(currentProfile().owner));
   handleDesktop('session:state', (event, hasContent) => {
     requireMain(event);
     if (event.senderFrame !== event.sender.mainFrame) throw Error('Unauthorized frame');
@@ -2016,7 +2028,21 @@ app.whenReady().then(async () => {
       return signIn(service).catch(connectionNotice);
     }
     const session = await profile.selection.session(service, (selected) => profile.session(selected, true)).catch(connectionNotice);
+    if (activeProfile !== profile || signingIn || disconnecting) return null;
+    if (session?.mode === 'chatgpt' || session?.mode === 'copilot')
+      await profile.accounts.set(session.mode, true, session.user);
+    if (activeProfile !== profile || signingIn || disconnecting || profile.selection.connected === false ||
+        (session && session.mode !== profile.selection.service)) return null;
     return !demoSession ? session : null;
+  });
+  handleDesktop('auth:accounts', async (event, ...args) => {
+    requireMain(event);
+    if (event.senderFrame !== event.sender.mainFrame) throw Error('Unauthorized frame');
+    if (args.length) throw Error('Invalid request');
+    const profile = currentProfile();
+    const accounts = await profile.accounts.details();
+    if (activeProfile !== profile) throw Error('账号已变化，请重新操作。');
+    return accounts;
   });
   // Entry can finish while the previous main window is still flushing its chat store.
   const finishSignedOutMain = async () => {
@@ -2054,9 +2080,10 @@ app.whenReady().then(async () => {
     try {
       demoSession = false;
       const session = isApiProvider(service) ? await profile.api.session(service)
-        : await (service === 'copilot' ? copilotAuth : auth).signIn();
+        : await profile.session(service, true) ?? await (service === 'copilot' ? copilotAuth : auth).signIn();
       if (!session) throw Error('请先配置该服务的 API 密钥。');
       if (activeProfile !== profile) throw Error('登录已取消。');
+      if (service === 'chatgpt' || service === 'copilot') await profile.accounts.set(service, true, session.user);
       if (mainWindow && !mainCloseApproved) {
         await selection.set(service, true);
         chatIpc?.cancelActive();
@@ -2116,31 +2143,42 @@ app.whenReady().then(async () => {
       expiresAt: null,
     };
   });
-  handleDesktop('auth:sign-out', async (event) => {
+  const changeAIService = async (
+    event: Electron.IpcMainInvokeEvent, logout: boolean, service?: AccountService,
+  ) => {
     requireMain(event);
     if (event.senderFrame !== event.sender.mainFrame) throw Error('Unauthorized frame');
     if (interviewActive()) throw Error('请先结束面试再断开 AI 服务。');
-    const { coordinator, selection, auth, copilotAuth, copilotRuntime } = currentProfile();
-    coordinator.cancelAll();
-    historyJobs?.cancelAll();
-    chatIpc?.cancelActive();
-    interviewCloseApproved = true;
-    interviewWindow?.close();
+    if (entryBusy || preparingProfile || leavingAccount || erasingAccount)
+      throw Error('账号操作正在进行，请稍候。');
+    const profile = currentProfile();
+    const { coordinator, selection, auth, copilotAuth, accounts } = profile;
+    if (signingIn || disconnecting || auth.isPending() || copilotAuth.isPending())
+      throw Error('账户正在变更，请稍后重试。');
     if (demoSession) {
       demoSession = false;
       mainCloseApproved = true;
       await returnToLogin();
       return { warning: null };
     }
-    interviewIpc?.cancel();
-    if (signingIn || disconnecting) throw Error('账户正在变更，请稍后重试。');
     disconnecting = true;
-    selection.changing();
-    invalidateModels();
+    const target = service ?? selection.service;
+    const selected = target === selection.service;
     try {
-      await selection.set(selection.service, false);
-      const result = isApiProvider(selection.service) ? { warning: null }
-        : await (selection.service === 'copilot' ? copilotAuth : auth).signOut();
+      if (selected) {
+        selection.changing();
+        invalidateModels();
+        coordinator.cancelAll();
+        historyJobs?.cancelAll();
+        chatIpc?.cancelActive();
+        interviewIpc?.cancel();
+        interviewCloseApproved = true;
+        interviewWindow?.close();
+        await selection.set(target, false);
+      }
+      const result = !logout || isApiProvider(target) ? { warning: null }
+        : await (target === 'copilot' ? copilotAuth : auth).signOut();
+      if (logout && (target === 'chatgpt' || target === 'copilot')) await accounts.set(target, false);
       if (result.warning && mainWindow)
         await dialog.showMessageBox(mainWindow, {
           type: 'warning',
@@ -2151,11 +2189,21 @@ app.whenReady().then(async () => {
       return result;
     } finally {
       try {
-        await copilotRuntime.stop();
+        await profile.stopService(target);
       } finally {
         disconnecting = false;
       }
     }
+  };
+  handleDesktop('auth:disable', async (event, ...args) => {
+    if (args.length) throw Error('Invalid request');
+    await changeAIService(event, false);
+  });
+  handleDesktop('auth:sign-out', async (event, ...args) => {
+    const [service] = args;
+    if (args.length > 1 || (service !== undefined && service !== 'chatgpt' && service !== 'copilot'))
+      throw Error('Invalid account service');
+    return changeAIService(event, true, service);
   });
   registerKnowledgeIpc({ call: (call) => currentProfile().coordinator.call(call) }, requireMain, () => components.require('rag'));
   registerApiConnectionIpc({
@@ -2183,6 +2231,16 @@ app.whenReady().then(async () => {
   });
   chatIpc = registerChatIpc({
     chat: new SelectedChatService(() => currentProfile().ragChat),
+    async accountUsage(service) {
+      const profile = currentProfile();
+      const saved = (await profile.accounts.list()).includes(service);
+      if (activeProfile !== profile || signingIn || disconnecting || !saved)
+        throw Error('请先登录模型服务后调用真实模型。');
+      const usage = await profile.accountUsage(service);
+      if (activeProfile !== profile || signingIn || disconnecting ||
+          !(await profile.accounts.list()).includes(service)) throw Error('账户已变更，请重新刷新额度。');
+      return usage;
+    },
     requireMain,
     isDemo: () => demoSession,
     openLink: (url) => shell.openExternal(url),
@@ -3164,6 +3222,7 @@ app.on('before-quit', (event) => {
     return;
   }
   if (updates && !updatesClosed) {
+    announcements?.dispose();
     event.preventDefault();
     if (updatesClosing) return;
     updatesClosing = true;

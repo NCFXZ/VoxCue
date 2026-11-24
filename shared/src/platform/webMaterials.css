@@ -87,12 +87,12 @@
   border-radius: 50%;
   corner-shape: round;
 }
-.web-materials .ui-button:is(.confirm-delete, .floating-end, .sidebar-update, .download-button) {
+.web-materials .ui-button:is(.confirm-delete, .floating-confirm-action, .sidebar-update, .download-button) {
   /* Keep semicircular end caps while width shrinks; 50% makes a wide oval. */
   border-radius: 999px;
 }
 :root.web-materials
-  .ui-button:is(.confirm-delete, .floating-end, .sidebar-update, .download-button) {
+  .ui-button:is(.confirm-delete, .floating-confirm-action, .sidebar-update, .download-button) {
   border-color: transparent;
 }
 .web-materials
@@ -498,14 +498,14 @@
   border-color: transparent;
   box-shadow: none;
 }
-.web-materials .floating-toolbar .floating-end.is-confirming {
+.web-materials .floating-toolbar .floating-confirm-action.is-confirming {
   background: var(--web-control-fill);
   color: var(--danger);
   border-color: transparent;
   box-shadow: none;
   filter: none;
 }
-.web-materials .floating-toolbar .floating-end.is-confirming:is(:hover, :focus-visible) {
+.web-materials .floating-toolbar .floating-confirm-action.is-confirming:is(:hover, :focus-visible) {
   background: var(--web-control-hover);
 }
 .web-materials

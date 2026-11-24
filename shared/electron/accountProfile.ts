@@ -18,7 +18,7 @@ import { UsageLedger } from './backend/chat/usage';
 import { CopilotAuthService } from './backend/copilot/auth';
 import { CopilotRuntime } from './backend/copilot/runtime';
 import { CopilotChatService } from './backend/copilot/service';
-import { createCopilotLoginStorage, createServiceSelection } from './backend/copilot/storage';
+import { createAccountServiceStorage, createCopilotLoginStorage, createServiceSelection } from './backend/copilot/storage';
 import { InterviewImageStore } from './backend/interview/images';
 import { KnowledgeHost } from './backend/knowledge/host';
 import type { PrepareKnowledgeDatabase } from './platform/types';
@@ -89,11 +89,13 @@ export function createAccountProfile(
     access: (signal) => copilotAuth.access(signal),
   });
   const selection = createServiceSelection(root);
+  const accounts = createAccountServiceStorage(root);
   // A bad preference can still be repaired by an explicit provider choice.
   void selection.ready.catch(() => {});
   let closed = false;
   const chat = new SelectedChatService(() => {
     if (closed || ports.changing()) throw Error('账户正在变更，请稍后重试。');
+    if (selection.connected === false) throw Error('请先连接 AI 服务。');
     if (isApiProvider(selection.service)) {
       if (!selection.connected) throw Error('请先连接 AI 服务。');
       return api.chat(selection.service);
@@ -120,7 +122,15 @@ export function createAccountProfile(
     copilotAuth,
     copilotRuntime,
     selection,
+    accounts,
     api,
+    accountUsage(service: 'chatgpt' | 'copilot') {
+      return service === 'copilot' ? copilot.accountUsage() : chatGPT.accountUsage();
+    },
+    stopService(service: AIService) {
+      return service === 'chatgpt' ? codex.stop()
+        : service === 'copilot' ? copilotRuntime.stop() : Promise.resolve();
+    },
     session(service: AIService, verify = false) {
       if (isApiProvider(service)) return api.session(service);
       if (service === 'copilot') return verify ? copilotAuth.verifiedSession() : copilotAuth.session();
@@ -135,6 +145,7 @@ export function createAccountProfile(
     async dispose(erase = false) {
       closed = true;
       const selectionDone = selection.dispose();
+      const accountsDone = accounts.dispose();
       invalidateModels();
       auth.cancel();
       copilotAuth.cancel();
@@ -148,6 +159,7 @@ export function createAccountProfile(
         await waitForProfileCleanup([
           api.dispose(),
           selectionDone,
+          accountsDone,
           knowledge.close(),
           images.dispose(),
           ledger.dispose(),

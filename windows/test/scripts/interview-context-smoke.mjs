@@ -1,4 +1,4 @@
-import { closeUiApp, connectUiAccount } from '../../../shared/test/scripts/install-ui-account.mjs';
+import { closeUiApp, connectUiAccount, showInterviewWindow } from '../../../shared/test/scripts/install-ui-account.mjs';
 import { testRoot, electron } from '../../../shared/test/scripts/test-workspace.mjs';
 import { offlineElectronEntry } from '../../../shared/test/scripts/offline-electron-entry.mjs';
 import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
@@ -236,12 +236,12 @@ try {
   const fresh = await app.evaluate(() => globalThis.contextRequests[3]);
   assert.equal(fresh.turns.length, 1);
   assert.ok(!JSON.stringify(fresh).includes('PostgreSQL'));
-  await floating.getByRole('button', { name: '关闭截图保护', exact: true }).click();
+  await showInterviewWindow(floating);
   await floating.getByText('此窗口未隐藏', { exact: true }).waitFor();
   await assertNoticeLayout();
   await floating.getByRole('button', { name: '开启截图保护', exact: true }).click();
   await floating.getByText('此窗口未隐藏', { exact: true }).waitFor({ state: 'hidden' });
-  await floating.getByRole('button', { name: '关闭截图保护', exact: true }).click();
+  await showInterviewWindow(floating);
   const codeQuestion = '用 Python 写两数之和，解释控制在20秒。';
   await floating.getByRole('textbox', { name: '面试提问', exact: true }).fill(codeQuestion);
   await floating.getByRole('button', { name: '发送面试问题', exact: true }).click();

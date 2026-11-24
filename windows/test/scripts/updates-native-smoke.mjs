@@ -238,6 +238,8 @@ try {
       const originalFetch = fetchers.get(updateSession);
       updateSession.fetch = (input, init) => {
         const url = new URL(String(input));
+        if (url.href === 'https://www.cloudflare-cn.com/cdn-cgi/trace')
+          return Promise.resolve(new Response('loc=GB\n'));
         globalThis.platformRequests.push(url.href);
         if (
           url.origin === 'https://api.github.com' &&

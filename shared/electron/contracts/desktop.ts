@@ -11,8 +11,9 @@ import type {
   ShortcutSettingsState,
 } from './shortcuts';
 import type { UpdateCall, UpdateState } from './updates';
+import type { AnnouncementsResult } from './announcements';
 import type { ComponentCall, ComponentState } from './components';
-import type { AuthSession, SignOutResult } from './auth';
+import type { AccountConnection, AccountService, AuthSession, SignOutResult } from './auth';
 import type { ApiConnections } from './apiConnections';
 import type { AccountUsage } from './accountUsage';
 import type { CloudAccountCall, CloudAccountResult } from './cloudAccount';
@@ -135,18 +136,21 @@ export interface DesktopAPI {
   systemAccent(): Promise<string | null>;
   onSystemAccent(callback: (color: string | null) => void): () => void;
   authSession(service?: AuthSession['mode'] | 'startup'): Promise<AuthSession | null>;
+  accountConnections(): Promise<AccountConnection[]>;
+  disableAIService(): Promise<void>;
   signInWithChatGPT(): Promise<AuthSession>;
   signInWithCopilot(): Promise<AuthSession>;
   cancelSignIn(): Promise<void>;
   enterDemo(): Promise<AuthSession>;
-  signOut(): Promise<SignOutResult>;
+  signOut(service?: AccountService): Promise<SignOutResult>;
   chatModels(force?: boolean): Promise<ServiceResult<{ models: ChatModel[] }>>;
   chatUsage(): Promise<ServiceResult<{ usage: AppUsage }>>;
-  chatAccountUsage(): Promise<ServiceResult<{ usage: AccountUsage | null }>>;
+  chatAccountUsage(service?: AccountService): Promise<ServiceResult<{ usage: AccountUsage | null }>>;
   chatResetUsage(): Promise<ServiceResult<{ usage: AppUsage }>>;
   chatSend(request: ChatRequest): Promise<ChatResult>;
   chatCancel(id: string): Promise<void>;
   chatOpenLink(url: string): Promise<void>;
+  announcements(): Promise<AnnouncementsResult>;
   onChatEvent(callback: (event: ChatEvent) => void): () => void;
   windowAction(action: WindowAction): void;
   updateSessionState(hasContent: boolean): Promise<void>;
@@ -229,6 +233,8 @@ export interface DesktopInvokeMap {
   'appearance:language': Invocation<DesktopAPI['setUILanguage']>;
   'appearance:accent': Invocation<DesktopAPI['systemAccent']>;
   'auth:session': Invocation<DesktopAPI['authSession']>;
+  'auth:accounts': Invocation<DesktopAPI['accountConnections']>;
+  'auth:disable': Invocation<DesktopAPI['disableAIService']>;
   'api-keys:list': Invocation<ApiConnections['list']>;
   'api-keys:configure': Invocation<ApiConnections['configure']>;
   'api-keys:control': Invocation<ApiConnections['control']>;
@@ -247,6 +253,7 @@ export interface DesktopInvokeMap {
   'chat:send': Invocation<DesktopAPI['chatSend']>;
   'chat:cancel': Invocation<DesktopAPI['chatCancel']>;
   'chat:open-link': Invocation<DesktopAPI['chatOpenLink']>;
+  'announcements:read': Invocation<DesktopAPI['announcements']>;
   'interview:open': Invocation<DesktopAPI['openInterview']>;
   'interview:check-access': Invocation<DesktopAPI['checkInterviewAccess']>;
   'interview:screen-permission': Invocation<DesktopAPI['screenCapturePermission']>;

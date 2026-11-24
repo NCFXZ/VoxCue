@@ -233,6 +233,46 @@ async function checkPersistence(main) {
   };
   const call = (operation, input = expected) =>
     main.evaluate(`(${operation.toString()})(${JSON.stringify(input)})`);
+  const click = (selector, label, text) =>
+    poll(
+      () =>
+        call(
+          ({ selector, text }) => {
+            const button = [...document.querySelectorAll(selector)].find(
+              (element) =>
+                element.getClientRects().length &&
+                !element.closest('[inert],[hidden]') &&
+                (text === undefined || (Array.isArray(text)
+                  ? text.includes(element.textContent.trim())
+                  : element.textContent.includes(text))),
+            );
+            if (!button) return false;
+            if (button.getAttribute('aria-haspopup') === 'menu') {
+              button.focus();
+              button.dispatchEvent(new KeyboardEvent('keydown', {
+                key: 'ArrowDown', code: 'ArrowDown', bubbles: true,
+              }));
+            } else button.click();
+            return true;
+          },
+          { selector, text },
+        ),
+      label,
+    );
+  if (config.phase !== 'verify') {
+    await click('button.user-button', 'settings user menu');
+    await click('.user-menu [role="menuitem"]', 'open settings', ['设置', 'Settings']);
+    await click('.settings-sidebar nav button', 'general settings', ['通用', 'General']);
+    await click('button[aria-label="语言"],button[aria-label="Language"]', 'language selector');
+    await click('[role="menuitemradio"]', 'Simplified Chinese', '简体中文');
+    await poll(() => main.evaluate('document.documentElement.lang === "zh-CN"'), 'Chinese settings UI');
+    await click('button[aria-label="外观主题"]', 'theme selector');
+    await click('.settings-theme-menu [role="menuitemradio"]', 'dark theme', '深色');
+    await poll(() => main.evaluate('localStorage.getItem("copilot-theme") === "dark" && document.documentElement.classList.contains("dark")'),
+      'theme selected and persisted through the settings UI');
+    await click('.settings-sidebar .dialog-close-button', 'close settings');
+    await poll(() => main.evaluate('!document.querySelector(".settings-dialog[open]")'), 'closed settings');
+  }
   async function checkIndex() {
     assert.ok(['seed', 'verify'].includes(config.phase));
     const { document } = expected;
@@ -342,8 +382,6 @@ async function checkPersistence(main) {
           }
           localStorage.setItem('copilot-personal-info-v1', JSON.stringify(seed.profile));
           localStorage.setItem('copilot-interview-history-v1', JSON.stringify(seed.history));
-          localStorage.setItem('copilot-theme', seed.theme);
-          localStorage.setItem('voxcue-language-v1', seed.language);
           const result = await window.desktop.shortcutSettings({
             op: 'set',
             action: 'toggle-window',
@@ -447,25 +485,6 @@ async function checkPersistence(main) {
     language:document.documentElement.lang })`),
     { dark: true, language: expected.language },
   );
-  const click = (selector, label, text) =>
-    poll(
-      () =>
-        call(
-          ({ selector, text }) => {
-            const button = [...document.querySelectorAll(selector)].find(
-              (element) =>
-                element.getClientRects().length &&
-                !element.closest('[inert],[hidden]') &&
-                (text === undefined || element.textContent.includes(text)),
-            );
-            if (!button) return false;
-            button.click();
-            return true;
-          },
-          { selector, text },
-        ),
-      label,
-    );
   await click('button[aria-label="个人信息"]', 'personal information');
   await poll(
     () =>

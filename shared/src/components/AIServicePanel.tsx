@@ -3,6 +3,8 @@ import { isApiProvider } from '../../electron/contracts/apiConnections';
 import { InterviewReveal } from './InterviewReveal';
 import { t } from '../i18n';
 import { useAuth } from '../stores/auth';
+import { useChatConnection } from '../stores/chatConnection';
+import type { AccountService } from '../../electron/contracts/auth';
 import { useCloudAccount } from '../stores/cloudAccount';
 import { Button } from './ui/button';
 import { SegmentedControl } from './ui/segmented-control';
@@ -12,7 +14,8 @@ import { ApiConnectionPanel } from './ApiConnectionPanel';
 import { providerInfo } from '../services/providers';
 import chatGPTIcon from '../assets/chatgpt.svg?inline';
 import copilotIcon from '../assets/copilot.svg?inline';
-import { Link, LinkOff, X } from './icons';
+import { LogIn, Play, Square, X } from './icons';
+import { LogOut } from './LogoutIcon';
 import { uiMessages } from '../../electron/contracts/uiMessages';
 
 const connectionNotices: Readonly<Record<string, string>> = {
@@ -38,18 +41,34 @@ const methods = [
   { value: 'account', label: '账号授权' },
   { value: 'api', label: 'API 密钥' },
 ] as const;
+const accountServices = [
+  ['chatgpt', chatGPTIcon],
+  ['copilot', copilotIcon],
+] as const;
 type ConnectionView = (typeof methods)[number]['value'];
 
 export function AIServicePanel() {
   const auth = useAuth();
   const localMode = useCloudAccount((s) => s.state.localMode);
   const connected = auth.session?.mode !== 'demo' && auth.session?.mode;
+  const [expanded, setExpanded] = useState<AccountService | null>(() =>
+    connected === 'chatgpt' || connected === 'copilot' ? connected : null,
+  );
+  const expandedSaved = !!expanded && (expanded === connected || auth.accounts.includes(expanded));
   const [choice, setChoice] = useState<ConnectionView>();
   const label = useId();
   const content = useRef<HTMLDivElement>(null);
   const requested = useRef<ConnectionView | undefined>(undefined);
   const initial = isApiProvider(connected) ? 'api' : 'account';
   const method = choice ?? initial;
+  useEffect(() => {
+    if (method !== 'account' || auth.waiting || !expanded || !expandedSaved) return;
+    const state = useChatConnection.getState();
+    if (expanded === connected) void state.refreshUsage();
+    else void state.refreshSavedUsage(expanded);
+    return () => { if (expanded !== connected) state.clearSavedUsage(expanded); };
+  }, [method, auth.waiting, expanded, expandedSaved, connected, auth.session?.user.id]);
+  useEffect(() => { void auth.loadAccounts(); }, [auth.loadAccounts]);
   useEffect(() => {
     if (auth.resolved || auth.startupChecked) setChoice((previous) => previous ?? initial);
   }, [auth.resolved, auth.startupChecked, initial]);
@@ -72,7 +91,7 @@ export function AIServicePanel() {
           : t('AI 服务独立授权，用于聊天与面试回答，不影响 VoxCue 主账号和云同步。')}
       </p>
       <div className="settings-entry">
-        <strong id={label}>{t('连接方式')}</strong>
+        <strong id={label}>{t('登录方式')}</strong>
         <SegmentedControl
           labelledBy={label}
           options={methods}
@@ -83,30 +102,28 @@ export function AIServicePanel() {
       <div ref={content}>
         {method === 'api' ? (
           <ApiConnectionPanel />
-        ) : (
-          <>
-            {(
-              [
-                ['chatgpt', chatGPTIcon],
-                ['copilot', copilotIcon],
-              ] as const
-            ).map(([service, icon]) => (
-              <div
-                className="settings-entry ai-service-row"
-                key={service}
-                data-settings-target={service}
-              >
-                <div className="ai-service-label">
+        ) : accountServices.map(([service, icon]) => {
+          const name = providerInfo(service).name;
+          const active = connected === service;
+          const saved = active || auth.accounts.includes(service);
+          const open = saved && expanded === service;
+          const user = active ? auth.session?.user : auth.accountUsers[service];
+          const identity = user?.email || user?.name;
+          return (
+            <div className="account-service" role="group" aria-label={name} key={service}>
+              <div className="settings-entry ai-service-row" data-settings-target={service}>
+                <button type="button" className="ai-service-label api-service-disclosure"
+                  disabled={!saved} aria-expanded={open} aria-controls={'account-settings-' + service}
+                  onClick={() => setExpanded(open ? null : service)}>
                   <img className="service-brand-icon" src={icon} alt="" />
-                  <div>
-                    <strong>{providerInfo(service).name}</strong>
-                    <p className="settings-hint">
-                      {connected === service
-                        ? auth.session?.user.email || t('已连接')
-                        : t(auth.resolved || auth.startupChecked ? '未连接' : '暂未验证连接状态')}
-                    </p>
-                  </div>
-                </div>
+                  <span>
+                    <strong>{name}</strong>
+                    <span className="settings-hint">
+                      {identity || t(active ? '当前使用中' : saved ? '已登录'
+                        : auth.accountsLoaded ? '未登录' : '暂未验证登录状态')}
+                    </span>
+                  </span>
+                </button>
                 <div className="ai-service-actions">
                   {auth.signingIn === service ? (
                     <>
@@ -119,23 +136,42 @@ export function AIServicePanel() {
                       </Button>
                     </>
                   ) : (
-                    <Button
-                      variant="outline"
-                      disabled={auth.waiting || auth.loading}
-                      onClick={() =>
-                        void (connected === service ? auth.signOut() : auth.connect(service))
-                      }
-                    >
-                      {connected === service ? <LinkOff size={16} /> : <Link size={16} />}
-                      {connected === service ? t('断开连接') : t('连接')}
-                    </Button>
+                    <>
+                      <Button
+                        variant="outline"
+                        disabled={auth.waiting || auth.loading}
+                        onClick={() => void (async () => {
+                          if (active) {
+                            if (await auth.disable()) setExpanded(selected => selected === service ? null : selected);
+                          } else {
+                            await auth.connect(service);
+                            if (useAuth.getState().session?.mode === service)
+                              setExpanded(selected => selected === expanded ? service : selected);
+                          }
+                        })()}
+                      >
+                        {active ? <Square size={16} /> : saved ? <Play size={16} /> : <LogIn size={16} />}
+                        {t(active ? '禁用' : saved ? '启用' : '登录')}
+                      </Button>
+                      {saved && (
+                        <Button variant="outline" disabled={auth.waiting || auth.loading}
+                          onClick={() => void auth.signOut(service).then(done => {
+                            if (done) setExpanded(selected => selected === service ? null : selected);
+                          })}>
+                          <LogOut size={16} />
+                          {t('退出登录')}
+                        </Button>
+                      )}
+                    </>
                   )}
                 </div>
               </div>
-            ))}
-            {connected && !isApiProvider(connected) && <UsagePanel />}
-          </>
-        )}
+              <div id={'account-settings-' + service}>
+                <InterviewReveal>{open ? <UsagePanel service={service} /> : null}</InterviewReveal>
+              </div>
+            </div>
+          );
+        })}
       </div>
       <InterviewReveal resizeKey={notice ?? ''}>
         {notice ? (

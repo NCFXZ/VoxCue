@@ -4,12 +4,16 @@ import {
   validateChanges,
   sameProfileField,
   validProfile,
+  type InterviewSkill,
   type PersonalInfo,
+  type ProfileField,
   type ProfileChanges,
   type ProfilePreview,
   type ProfileGeneration,
 } from '../../contracts/profile';
 import type { ChatRequest } from '../../contracts/chat';
+import { record } from './models';
+import { validSource } from './validation';
 export type SkillScope = 'all' | 'topic' | null;
 const entryProperties = {
   id: { type: 'string' },
@@ -66,7 +70,7 @@ export const profileFormat = {
           type: ['string', 'null'],
           enum: ['all', 'topic', null],
           description:
-            '根据当前请求及对话上下文判断技能操作范围：整套生成或更新为 all；用户指定具体主题的新增或改写为 topic；不改技能或仅删除为 null。此字段放在 changes 之后，不展示给用户。',
+            '根据当前请求及对话上下文判断技能操作范围：整套生成或更新为 all；用户指定具体主题的新增或改写为 topic；不改技能或仅删除为 null。此字段与 answer、changes 同级，不放进 changes，也不展示给用户。',
         },
       },
       required: ['answer', 'changes', 'skillScope'],
@@ -98,12 +102,11 @@ export const profileInstructions = `你可以读取当前个人资料，并在�
 
 知识库边界：准备聊天及生成/更新技能默认不使用知识库。只有用户明确要求使用知识库（或结合上下文明确同意使用）且本次实际提供检索内容时，才把它作为待核实的参考；选择了面试知识库、同意生成技能或允许联网均不等于同意使用知识库。未经本次授权，不沿用历史回答中转述的知识库内容或 [KB1] 等编号。以已确认简历和JD中的个人事实、用户当前要求、模型知识及按需搜索的可靠资料独立整理；已有技能用于确定修改范围和稳定 id，其技术内容仍需重新判断，不因已保存或来自知识库就视为正确。不要声称查阅了未提供的知识库。
 
-技能来源：仅写入 changes.skills 的标题和正文只写文字，不附网址、Markdown 链接、引用编号或来源清单。支持内容的来源填入 sources 字段，仅供后台核验；使用工具实际返回的完整 URL，不猜测、不虚构、不改写路径或版本。
+技能来源：仅写入 changes.skills 的标题和正文只写文字，不附网址、Markdown 链接、引用编号或来源清单。支持内容的来源填入对应技能条目自身的 sources 字段，不在 changes 下另设来源清单，仅供后台核验；使用工具实际返回的完整 URL，不猜测、不虚构、不改写路径或版本。
 
 存储限制（仅为保护上限，不是写作目标，不为接近上限而扩写）：技能最多10项；id 为1–64个字母、数字、下划线或短横线；标题最多80字符；每项正文最多6000字符；自定义指令最多16384字符；所有资料合计最多40000字符。超限时在 answer 中说明需分次处理，不静默截断。数组返回完整新列表，空数组表示全部删除；空字符串表示清除；null 表示不更新。
 
 确认：changes 只是待确认提案。用户仅通过提案卡片逐项勾选并点击“保存所选”来保存，未选字段和未选中的已有技能保持原值；点击后直接保存，不要求二次确认。聊天中的“确认”“只保存…”等文字不执行保存，不据此宣称已保存，也不重复生成同一提案；如用户用文字要求保存，简短提示在提案卡片上勾选并点击“保存所选”。以应用提供的本机操作状态及实际已保存字段为准：已保存或已拒绝的提案不再索要确认，待确认提案不阻塞普通聊天。`;
-
 /** Shared preparation policy for ChatGPT and Copilot; profile values remain data. */
 export function profileContext(request: ChatRequest): string {
   if (!request.profile) return '';
@@ -112,6 +115,9 @@ export function profileContext(request: ChatRequest): string {
 
 // Only stream the answer string, never expose the JSON protocol in the chat UI.
 const answerPrefix = ['{', '"answer"', ':', '"'];
+const fencedProfile = /^[\t \r\n]*```[ \t]*json[ \t]*\r?\n([\s\S]*?)\r?\n[ \t]*```[\t \r\n]*$/i;
+export class ProfileOutputError extends Error {}
+
 export class ProfileAnswerStream {
   raw = '';
   answerComplete = false;
@@ -121,6 +127,14 @@ export class ProfileAnswerStream {
   private prefixToken = 0;
   private tokenOffset = 0;
   private escapeTail = '';
+  private invalidAnswer = false;
+
+  constructor(private readonly recoverableOutput = false) {}
+
+  get previewReady() {
+    return this.answerComplete;
+  }
+
   append(chunk: string) {
     const chunkStart = this.raw.length;
     this.raw += chunk;
@@ -143,8 +157,12 @@ export class ProfileAnswerStream {
       }
     }
 
-    const offset = chunkStart + start - this.escapeTail.length;
-    const text = this.escapeTail + chunk.slice(start);
+    return this.appendAnswer(chunk.slice(start), chunkStart + start);
+  }
+
+  private appendAnswer(chunk: string, start: number) {
+    const offset = start - this.escapeTail.length;
+    const text = this.escapeTail + chunk;
     this.escapeTail = '';
     let end = 0;
     while (end < text.length) {
@@ -168,80 +186,189 @@ export class ProfileAnswerStream {
       this.visible += delta;
       return delta;
     } catch {
-      throw new Error('资料回答格式无效。');
+      if (!this.recoverableOutput) throw new Error('资料回答格式无效。');
+      this.invalidAnswer = true;
+      this.answerComplete = false;
+      this.prefixToken = -1;
+      return '';
     }
   }
   preview(): ProfilePreview | undefined {
     this.generation = undefined;
-    if (!this.answerComplete) return;
+    if (!this.previewReady) return;
     const match = this.raw.slice(this.answerEnd).match(/^\s*,\s*"changes"\s*:\s*/);
     if (!match) return;
-    const parsed = partialValue(this.raw.slice(this.answerEnd + match[0].length));
-    const changes = parsed?.value;
-    if (!parsed || !changes || typeof changes !== 'object' || Array.isArray(changes)) return;
-    const preview: ProfilePreview = {};
-    const generation: ProfileGeneration = { fields: [], skillIndexes: [] };
-    const incomplete = (...path: Array<string | number>) =>
-      !parsed.completePaths.has(JSON.stringify(path));
-    let remaining = 40000;
-    const text = (value: unknown, limit: number) => {
-      if (typeof value !== 'string') return '';
-      const result = value.slice(0, Math.min(limit, remaining));
-      remaining -= result.length;
-      return result;
-    };
-    for (const key of profileFields) {
-      const value = (changes as Record<string, unknown>)[key];
-      if (key !== 'skills' && typeof value === 'string') {
-        preview[key] = text(value, profileLimits[key]);
-        if (incomplete(key)) generation.fields.push(key);
-      }
-      if (key === 'skills' && Array.isArray(value)) {
-        if (incomplete(key)) generation.fields.push(key);
-        preview.skills = value.slice(0, 10).map((item, index) => {
-          if (incomplete(key, index)) generation.skillIndexes.push(index);
-          return {
-            ...(!incomplete(key, index, 'id') &&
-            typeof item?.id === 'string' &&
-            /^[\w-]{1,64}$/.test(item.id)
-              ? { id: item.id }
-              : {}),
-            title: text(item?.title, 80),
-            content: text(item?.content, 6000),
-          };
-        });
-      }
-    }
-    this.generation = generation;
-    return Object.keys(preview).length ? preview : undefined;
+    const result = streamedProfilePreview(this.raw.slice(this.answerEnd + match[0].length));
+    this.generation = result?.generation;
+    return result?.preview;
   }
-  finish(base: PersonalInfo): { delta: string; changes: ProfileChanges; skillScope: SkillScope } {
-    let value: any;
+  finish(base: PersonalInfo): {
+    answerText: string;
+    delta: string;
+    changes: ProfileChanges;
+    skillScope: SkillScope;
+  } {
+    if (this.invalidAnswer) throw this.outputError('资料回答格式无效。');
+    let value: ReturnType<typeof record>;
     try {
-      value = JSON.parse(this.raw);
+      const fenced = this.recoverableOutput ? fencedProfile.exec(this.raw) : undefined;
+      value = record(JSON.parse(fenced?.[1] ?? this.raw));
     } catch {
-      throw new Error('资料更新提案不完整，未修改个人信息，请重试。');
+      throw this.outputError('资料更新提案不完整，未修改个人信息，请重试。');
     }
     if (
       !value ||
       Object.keys(value).some((key) => !['answer', 'changes', 'skillScope'].includes(key)) ||
-      typeof value.answer !== 'string' ||
-      (value.skillScope !== undefined && ![null, 'all', 'topic'].includes(value.skillScope))
+      typeof value.answer !== 'string'
     )
-      throw new Error('资料更新格式无效，未修改个人信息。');
-    const changes = validateChanges(value.changes);
-    if (!validProfile({ ...base, ...changes }))
-      throw Error('资料更新内容超限或格式无效，未修改个人信息。');
-    for (const key of profileFields)
-      if (changes[key] !== undefined && sameProfileField({ ...base, ...changes }, base, key))
-        delete changes[key];
-    if (!value.answer.startsWith(this.visible)) throw new Error('资料回答内容不一致。');
+      throw this.outputError('资料更新格式无效，未修改个人信息。');
+    let changes: ProfileChanges, skillScope: SkillScope;
+    try {
+      ({ changes, skillScope } = resolveProposal(base, value));
+    } catch (error) {
+      if (this.recoverableOutput && error instanceof Error) throw new ProfileOutputError(error.message);
+      throw error;
+    }
+    if (!value.answer.startsWith(this.visible)) throw this.outputError('资料回答内容不一致。');
     return {
+      answerText: value.answer,
       delta: value.answer.slice(this.visible.length),
       changes,
-      skillScope: value.skillScope ?? null,
+      skillScope,
     };
   }
+
+  private outputError(message: string) {
+    return this.recoverableOutput ? new ProfileOutputError(message) : new Error(message);
+  }
+}
+
+/**
+ * Validate a complete proposal against its base and drop fields that would not change.
+ * Without an enforced schema, models sometimes nest `skillScope` or a source list inside
+ * `changes`; only those known metadata keys move back out. Any other key still rejects it.
+ */
+export function resolveProposal(
+  base: PersonalInfo,
+  root: Record<string, unknown>,
+): { changes: ProfileChanges; skillScope: SkillScope } {
+  const nested = record(root.changes);
+  let skillScope = root.skillScope ?? null;
+  let fields: unknown = root.changes;
+  if (nested) {
+    fields = {};
+    for (const [key, value] of Object.entries(nested)) {
+      if (profileFields.includes(key as ProfileField)) (fields as Record<string, unknown>)[key] = value;
+      else if (key === 'skillScope') {
+        if (skillScope === null) skillScope = value ?? null;
+        else if (value !== null && value !== skillScope)
+          throw Error('资料更新中的技能范围前后不一致，未修改个人信息。');
+      } else if (key !== 'sources' || !Array.isArray(value)) {
+        // Only the trimmed key name is shown; field values never enter the message.
+        throw Error(`资料更新包含未知字段：${key.replace(/[\p{Cc}\p{Cf}]/gu, '').slice(0, 40)}。`);
+      }
+    }
+  }
+  if (skillScope !== null && skillScope !== 'all' && skillScope !== 'topic')
+    throw Error('资料更新格式无效，未修改个人信息。');
+  const skills = record(fields)?.skills;
+  if (Array.isArray(skills)) (fields as Record<string, unknown>).skills = proposalSkills(base, skills);
+  const changes = validateChanges(fields);
+  if (!validProfile({ ...base, ...changes }))
+    throw Error('资料更新内容超限或格式无效，未修改个人信息。');
+  for (const key of profileFields)
+    if (changes[key] !== undefined && sameProfileField({ ...base, ...changes }, base, key))
+      delete changes[key];
+  return { changes, skillScope: skillScope as SkillScope };
+}
+
+const plainLabel = (text: string) => text.replace(/[\p{Cc}\p{Cf}]/gu, '').trim().slice(0, 40);
+const skillKeys = new Set(['id', 'title', 'content', 'sources']);
+const validSkillId = (id: unknown): id is string => typeof id === 'string' && /^[\w-]{1,64}$/.test(id);
+
+/**
+ * Repair only what cannot change a skill's meaning: a missing or malformed source list (claimed
+ * sources are verified separately) and an id that is not a valid identifier. A new id never
+ * reuses another item's or an existing skill's id unless the title is exactly that skill's title.
+ * Content problems are reported for the specific skill.
+ */
+function proposalSkills(base: PersonalInfo, items: unknown[]): InterviewSkill[] {
+  if (items.length > 10) throw Error(`技能最多 10 项，本次提案有 ${items.length} 项，未修改个人信息。`);
+  const existing = base.skills ?? [];
+  const explicit = new Set(items.map(item => record(item)?.id).filter(validSkillId));
+  const reserved = new Set([...existing.map(skill => skill.id), ...explicit]);
+  const used = new Set<string>();
+  let next = 1;
+  return items.map((value, index) => {
+    const item = record(value);
+    const name = typeof item?.title === 'string' && plainLabel(item.title) ? plainLabel(item.title) : `#${index + 1}`;
+    if (!item) throw Error(`技能「${name}」格式无效，未修改个人信息。`);
+    const extra = Object.keys(item).find(key => !skillKeys.has(key));
+    if (extra) throw Error(`技能「${name}」包含未知字段：${plainLabel(extra)}，未修改个人信息。`);
+    if (typeof item.title !== 'string' || !item.title.trim() || item.title.length > 80)
+      throw Error(`技能「${name}」的标题为空或超过 80 个字符，未修改个人信息。`);
+    if (typeof item.content !== 'string' || !item.content.trim() || item.content.length > 6000)
+      throw Error(`技能「${name}」的正文为空或超过 6000 个字符，未修改个人信息。`);
+    let id = validSkillId(item.id) ? item.id : existing.find(skill =>
+      skill.title === item.title && !explicit.has(skill.id) && !used.has(skill.id))?.id;
+    while (!id || (!validSkillId(item.id) && used.has(id))) {
+      id = `skill-${next++}`;
+      if (reserved.has(id)) id = undefined;
+    }
+    if (used.has(id)) throw Error(`技能 id 重复：${id}，未修改个人信息。`);
+    used.add(id);
+    const sources = (Array.isArray(item.sources) ? item.sources : []).flatMap(source => {
+      const valid = validSource(source);
+      return valid ? [valid] : [];
+    }).slice(0, 10);
+    return { id, title: item.title, content: item.content, sources };
+  });
+}
+
+/** Read-only preview of the streamed changes object at `path`; never a saveable proposal. */
+export function streamedProfilePreview(
+  raw: string,
+  path: string[] = [],
+): { preview?: ProfilePreview; generation: ProfileGeneration } | undefined {
+  const parsed = partialValue(raw);
+  let changes = parsed?.value;
+  for (const key of path) changes = record(changes)?.[key];
+  const fields = record(changes);
+  if (!parsed || !fields) return;
+  const preview: ProfilePreview = {};
+  const generation: ProfileGeneration = { fields: [], skillIndexes: [] };
+  const incomplete = (...rest: Array<string | number>) =>
+    !parsed.completePaths.has(JSON.stringify([...path, ...rest]));
+  let remaining = 40000;
+  const text = (value: unknown, limit: number) => {
+    if (typeof value !== 'string') return '';
+    const result = value.slice(0, Math.min(limit, remaining));
+    remaining -= result.length;
+    return result;
+  };
+  for (const key of profileFields) {
+    const value = fields[key];
+    if (key !== 'skills' && typeof value === 'string') {
+      preview[key] = text(value, profileLimits[key]);
+      if (incomplete(key)) generation.fields.push(key);
+    }
+    if (key === 'skills' && Array.isArray(value)) {
+      if (incomplete(key)) generation.fields.push(key);
+      preview.skills = value.slice(0, 10).map((item, index) => {
+        if (incomplete(key, index)) generation.skillIndexes.push(index);
+        return {
+          ...(!incomplete(key, index, 'id') &&
+          typeof item?.id === 'string' &&
+          /^[\w-]{1,64}$/.test(item.id)
+            ? { id: item.id }
+            : {}),
+          title: text(item?.title, 80),
+          content: text(item?.content, 6000),
+        };
+      });
+    }
+  }
+  return { ...(Object.keys(preview).length ? { preview } : {}), generation };
 }
 
 // Parse only completed tokens and the available prefix of a string. No code evaluation,

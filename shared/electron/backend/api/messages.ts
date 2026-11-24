@@ -1,112 +1,59 @@
-import type { ChatEvent, ChatRequest, TokenUsage } from '../../contracts/chat';
+import type { ChatEvent, ChatRequest, ChatSource, TokenUsage } from '../../contracts/chat';
 import { mergeActivityLog, type ChatActivity } from '../../contracts/activity';
 import { encodeAttachmentBody, noWebSearchInstructions, prepareResponseInput } from '../chat/input';
-import { ProfileAnswerStream, profileContext, profileSchemaInstructions } from '../chat/profile';
+import { ProfileOutputError, profileContext } from '../chat/profile';
 import { ProfilePreviews } from '../chat/profilePreviews';
 import { verifySkillProposal } from '../chat/proposal';
 import { responseEvents } from '../chat/responses';
 import { ChatServiceError } from '../chat/errors';
-import type { ApiModel, CompatibleApi } from './types';
+import { deepseekApi } from './catalogs';
+import { DeepSeekProfileStream, deepSeekProfileInstructions } from './deepseekProfile';
+import { DeepSeekWebResults } from './deepseekWeb';
+import type { ApiModel } from './types';
 
-function messageParts({ input, attachments }: ReturnType<typeof prepareResponseInput>, model: ApiModel, nativeClaude: boolean) {
-  return input.map(({ role, content }) => {
+export function messagesBody(
+  request: ChatRequest,
+  model: ApiModel,
+  signal: AbortSignal,
+  flashSearch?: boolean,
+  responsesSearch?: boolean,
+  // A recovery or structure follow-up states its own search limits.
+  skipSearchNote?: boolean,
+) {
+  const { input, attachments } = prepareResponseInput(request);
+  const turns = input.map(({ role, content }) => {
     if (typeof content === 'string') return { role, content };
-    const parts = content.map((part) => {
+    const parts = content.map(part => {
       if (part.type === 'input_text') return { type: 'text', text: part.text };
-      const image = part.type === 'input_image';
-      if (image && model.imageInput !== true)
-        throw Error('所选模型未确认支持图片输入，请移除图片或更换模型。');
-      if (!nativeClaude) {
-        if (image) return { type: 'image_url', image_url: { url: part.image_url } };
-        throw Error('该 API 连接支持文本和所选模型可读取的图片，请将文档转换成纯文本再发送。');
+      if (part.type === 'input_image') {
+        if (model.imageInput !== true)
+          throw Error('所选模型未确认支持图片输入，请移除图片或更换模型。');
+        return { type: 'image_url', image_url: { url: part.image_url } };
       }
-      const data = image ? part.image_url : part.file_data;
-      const separator = typeof data === 'string' ? data.indexOf(',') : -1;
-      const media_type = typeof data === 'number' ? attachments[data].mime : data.slice(5, separator - ';base64'.length);
-      if (!image && (media_type !== 'application/pdf' || !model.pdfInput))
-        throw Error('所选模型不支持该文档格式，请转换成纯文本再发送。');
-      return {
-        type: image ? 'image' : 'document',
-        source: { type: 'base64', media_type, data: typeof data === 'number' ? data : data.slice(separator + 1) },
-      };
+      throw Error('该 API 连接支持文本和所选模型可读取的图片，请将文档转换成纯文本再发送。');
     });
     return { role, content: parts };
   });
-}
-
-export function messagesBody(request: ChatRequest, model: ApiModel, adapter: CompatibleApi | undefined, signal: AbortSignal) {
-  const prepared = prepareResponseInput(request);
-  const turns = messageParts(prepared, model, !adapter);
-  const json = JSON.stringify(messageEnvelope(request, model, turns, prepared.attachments, adapter));
-  return prepared.attachments.length
-    ? encodeAttachmentBody(json, prepared.attachments, signal, adapter ? 'compatible' : 'claude')
-    : json;
-}
-
-function messageEnvelope(request: ChatRequest, model: ApiModel, turns: ReturnType<typeof messageParts>,
-  attachments: ReturnType<typeof prepareResponseInput>['attachments'], adapter?: CompatibleApi) {
   let instructions = request.instructions + profileContext(request);
-  if (request.webSearch) instructions += noWebSearchInstructions;
-  if (request.profile) instructions += profileSchemaInstructions;
-  if (!adapter) {
-    const effort = request.effort;
-    return {
-      model: model.id,
-      stream: true,
-      max_tokens: Math.min(model.maxOutput ?? 8192, 16384),
-      ...(instructions ? { system: instructions } : {}),
-      messages: turns,
-      ...(effort === 'none'
-        ? { thinking: { type: 'disabled' } }
-        : effort
-          ? {
-              ...(model.adaptiveThinking
-                ? { thinking: { type: 'adaptive' } }
-                : effort === 'on'
-                  ? { thinking: { type: 'enabled', budget_tokens: 1024 } }
-                  : {}),
-              ...(effort === 'on' ? {} : { output_config: { effort } }),
-            }
-          : {}),
-    };
+  if (flashSearch || responsesSearch) {
+    instructions += '\n需要最新资料或核验时，使用联网搜索查找公开信息，并引用本轮实际检索到的来源。搜索词和网址不得包含个人资料、私人附件或知识库内容。';
+  } else if (!skipSearchNote) {
+    instructions += noWebSearchInstructions;
   }
-  if (adapter.replayTextHistory?.(model) && turns.length > 1) {
-    // Some models require private reasoning on assistant turns. Keep imported
-    // public transcripts as quoted user data and preserve the order of images.
-    const content: Record<string, unknown>[] = [];
-    for (const turn of turns.slice(0, -1)) {
-      const parts =
-        typeof turn.content === 'string' ? [{ type: 'text', text: turn.content }] : turn.content;
-      content.push({ type: 'text', text: JSON.stringify({ historicalRole: turn.role }) });
-      for (const part of parts) {
-        if (part.type === 'text' && typeof part.text === 'number') {
-          attachments[part.text].quotedProperty = 'historicalText';
-          content.push(part);
-        } else {
-          content.push(part.type === 'text'
-            ? { type: 'text', text: JSON.stringify({ historicalText: part.text }) }
-            : part);
-        }
-      }
-    }
-    content.push({ type: 'text', text: '以上为历史对话资料。以下为当前用户消息。' });
-    const current = turns.at(-1)!.content;
-    content.push(...(typeof current === 'string' ? [{ type: 'text', text: current }] : current));
-    return compatibleBody([{ role: 'user', content }]);
-  }
-  return compatibleBody(turns);
+  if (request.profile) instructions += deepSeekProfileInstructions;
 
-  function compatibleBody(messages: unknown[]) {
-    return {
-      model: model.id,
-      stream: true,
-      ...(adapter!.streamUsage?.(model) !== false ? { stream_options: { include_usage: true } } : {}),
-      ...(request.effort ? adapter!.reasoning?.(model, request.effort) : {}),
-      ...(adapter!.historyOptions && turns.some(turn => turn.role === 'assistant')
-        ? adapter!.historyOptions(model) : {}),
-      messages: instructions ? [{ role: 'system', content: instructions }, ...messages] : messages,
-    };
-  }
+  const json = JSON.stringify({
+    model: model.id,
+    stream: true,
+    ...(flashSearch ? {
+      tools: [{ type: 'deepseek_web_search' }],
+      safety_check: { level: 'high' },
+    } : {}),
+    stream_options: { include_usage: true },
+    ...(request.effort ? deepseekApi.reasoning(request.effort) : {}),
+    messages: instructions ? [{ role: 'system', content: instructions }, ...turns] : turns,
+  });
+  return attachments.length ? encodeAttachmentBody(json, attachments, signal, 'compatible') : json;
 }
 
 const count = (value: unknown): value is number =>
@@ -117,20 +64,35 @@ function usageCounts(input: unknown, output: unknown, total?: unknown): TokenUsa
   if (!count(sum)) return null;
   return { inputTokens: input, outputTokens: output, totalTokens: sum };
 }
+const addUsage = (a: TokenUsage | null, b: TokenUsage | null): TokenUsage | null => a && b ? {
+  inputTokens: a.inputTokens + b.inputTokens,
+  outputTokens: a.outputTokens + b.outputTokens,
+  totalTokens: a.totalTokens + b.totalTokens,
+} : a ?? b;
 
 export async function receiveMessages(
   response: Response,
   request: ChatRequest,
-  nativeClaude: boolean,
   emit: (event: ChatEvent) => void,
   signal: AbortSignal,
   saveUsage: (id: string, usage: TokenUsage) => Promise<void>,
+  options: {
+    webSearch?: boolean;
+    events?: ReturnType<typeof responseEvents>;
+    /** Asks only for the intent and proposal of an answer whose structure was unreliable. */
+    requestStructure?: (answerText: string) => Promise<Response>;
+  } = {},
 ) {
-  const profile = request.profile ? new ProfileAnswerStream() : undefined;
-  using previews = profile && new ProfilePreviews(request.id, emit, signal);
+  const deepSeekWeb = options.webSearch ? new DeepSeekWebResults() : undefined;
+  const profile = request.profile ? new DeepSeekProfileStream() : undefined;
   let activities: ChatActivity[] = [];
   let lastPhase: ChatActivity['phase'] | undefined;
   let sequence = 0;
+  let warning: string | undefined;
+  const publishActivity = (item: ChatActivity) => {
+    activities = mergeActivityLog(activities, item);
+    emit({ id: request.id, type: 'activity', activity: item });
+  };
   const activity = (phase: ChatActivity['phase'], completed = false) => {
     if (lastPhase === phase && !completed) return;
     if (lastPhase && !completed) activity(lastPhase, true);
@@ -140,57 +102,35 @@ export async function receiveMessages(
       id: 'api-phase-' + (completed ? sequence : ++sequence),
       status: completed ? 'completed' : 'in_progress',
     };
-    activities = mergeActivityLog(activities, item);
-    emit({ id: request.id, type: 'activity', activity: item });
+    publishActivity(item);
     lastPhase = phase;
   };
-  activity('waiting');
-  let text = '',
-    responseId = '',
-    complete = false;
-  let stopReason: unknown;
-  let usage: TokenUsage | null = null;
-  let claudeInput: number | undefined, claudeOutput: number | undefined;
-  let cacheRead = 0, cacheWrite = 0;
-  function captureClaude(value: Record<string, unknown> | undefined) {
-    if (!value) return;
-    if (count(value.input_tokens)) claudeInput = value.input_tokens;
-    if (count(value.cache_creation_input_tokens)) cacheWrite = value.cache_creation_input_tokens;
-    if (count(value.cache_read_input_tokens)) cacheRead = value.cache_read_input_tokens;
-    if (count(value.output_tokens)) claudeOutput = value.output_tokens;
-    usage = usageCounts(claudeInput === undefined ? undefined : claudeInput + cacheRead + cacheWrite, claudeOutput);
-  }
-  for await (const event of responseEvents(response, signal)) {
-    if (event.type === 'error' || event.error)
-      throw new ChatServiceError({ message: '模型服务返回流式错误，已保留收到的回答。' });
-    let delta: unknown,
-      thinking = false;
-    if (nativeClaude) {
-      if (event.type === 'message_start') {
-        responseId = event.message?.id;
-        captureClaude(event.message?.usage);
-      }
-      if (event.type === 'content_block_start') {
-        const block = event.content_block?.type;
-        thinking = block === 'thinking' || block === 'redacted_thinking';
-      }
-      if (event.type === 'content_block_delta') {
-        if (event.delta?.type === 'text_delta') delta = event.delta.text;
-        thinking = event.delta?.type === 'thinking_delta';
-      }
-      if (event.type === 'message_delta') {
-        captureClaude(event.usage);
-        if (event.delta?.stop_reason) stopReason = event.delta.stop_reason;
-      }
-      if (event.type === 'message_stop') {
-        complete = true;
-        break;
-      }
-    } else {
+  let previewShown = false;
+  using previews = profile && new ProfilePreviews(request.id, (event) => {
+    activity('organizing');
+    previewShown = true;
+    emit(event);
+  }, signal);
+
+  // Read one reply to a normal stop. Text is handed to `receive`; usage is saved even on failure.
+  const consume = async (
+    events: AsyncIterable<any>,
+    receive: (delta: string) => void,
+    reasoning: ChatActivity['phase'],
+    web?: DeepSeekWebResults,
+  ) => {
+    let text = '',
+      responseId = '',
+      complete = false;
+    let stopReason: unknown;
+    let streamFailed = false;
+    let usage: TokenUsage | null = null;
+    for await (const event of events) {
+      const failed = event.type === 'error' || !!event.error;
+      if (failed && !web)
+        throw new ChatServiceError({ message: '模型服务返回流式错误，已保留收到的回答。' });
       if (typeof event.id === 'string' && !responseId) responseId = event.id;
       const choice = event.choices?.[0];
-      delta = choice?.delta?.content;
-      thinking = !!choice?.delta?.reasoning_content;
       if (choice?.finish_reason) {
         stopReason = choice.finish_reason;
         complete = true;
@@ -201,54 +141,106 @@ export async function receiveMessages(
           event.usage.completion_tokens,
           event.usage.total_tokens,
         );
+      if (failed) {
+        streamFailed = true;
+        break;
+      }
+      if (choice?.finish_reason !== 'content_filter' && web?.ingest(choice, item => {
+        if (item.status === 'in_progress') activity(item.phase);
+        publishActivity(item);
+      }))
+        emit({ id: request.id, type: 'sources', sources: [...web.sources.values()] });
+      if (choice?.delta?.reasoning_content) activity(reasoning);
+      const delta = choice?.delta?.content;
+      if (typeof delta === 'string' && delta) {
+        if (text.length + delta.length > 1000000) throw Error('回答过长，已停止接收。');
+        text += delta;
+        receive(delta);
+      }
     }
-    if (thinking) activity('thinking');
-    if (typeof delta === 'string' && delta) {
-      if (text.length + delta.length > 1000000) throw Error('回答过长，已停止接收。');
-      text += delta;
-      const visible = profile ? profile.append(delta) : delta;
-      activity(profile?.answerComplete ? 'organizing' : 'writing');
-      if (visible) emit({ id: request.id, type: 'delta', text: visible });
-      previews?.update(profile);
+    signal.throwIfAborted();
+    // A length-limited response or an invalid profile proposal can still be billed.
+    if ((complete || streamFailed) && usage && typeof responseId === 'string' && /^[\w.:-]{1,200}$/.test(responseId)) {
+      try {
+        await saveUsage(responseId, usage);
+      } catch {
+        warning = '回答已接收，但本机用量保存失败。';
+      }
     }
-  }
-  signal.throwIfAborted();
-  let warning: string | undefined;
-  // A length-limited response or an invalid profile proposal can still be billed.
-  if (complete && usage && typeof responseId === 'string' && /^[\w.:-]{1,200}$/.test(responseId)) {
-    try {
-      await saveUsage(responseId, usage);
-    } catch {
-      warning = '回答已接收，但本机用量保存失败。';
-    }
-  }
-  signal.throwIfAborted();
-  if (complete && (stopReason === 'refusal' || stopReason === 'content_filter' || stopReason === 'sensitive'))
-    throw new ChatServiceError({ code: 'content_filter', message: '模型服务拒绝了这次请求。' });
-  if (stopReason === 'model_context_window_exceeded')
-    throw new ChatServiceError({ code: stopReason, message: '请求已超出模型上下文窗口，请缩短对话或减少附件后重试。' });
-  if (stopReason === 'network_error')
-    throw new ChatServiceError({ code: stopReason, message: '模型推理中断，已保留收到的内容，请稍后重试。' });
-  const finished = nativeClaude ? stopReason === 'end_turn' || stopReason === 'stop_sequence' : stopReason === 'stop';
-  if (!complete || !finished || !text.trim())
+    signal.throwIfAborted();
+    if (streamFailed)
+      throw new ChatServiceError({ message: '模型服务返回流式错误，已保留收到的回答。' });
+    if (complete && (stopReason === 'refusal' || stopReason === 'content_filter' || stopReason === 'sensitive'))
+      throw new ChatServiceError({
+        code: 'content_filter', message: '模型服务拒绝了这次请求。',
+        ...(web ? { discardPartial: true } : {}),
+      });
+    if (stopReason === 'model_context_window_exceeded')
+      throw new ChatServiceError({ code: stopReason, message: '请求已超出模型上下文窗口，请缩短对话或减少附件后重试。' });
+    if (stopReason === 'network_error')
+      throw new ChatServiceError({ code: stopReason, message: '模型推理中断，已保留收到的内容，请稍后重试。' });
+    if (profile && stopReason === 'length')
+      throw new ChatServiceError({ code: 'length', message: 'DeepSeek 的回答达到输出长度上限，请缩短请求后重试。' });
+    if (profile && (stopReason === 'insufficient_system_resource' || stopReason === 'aborted'))
+      throw new ChatServiceError({ code: stopReason, message: 'DeepSeek 中断了生成，请稍后重试。' });
+    if (!complete || stopReason !== 'stop')
+      throw Error('回答未完整返回，已保留收到的内容，请重试。');
+    return { text, usage };
+  };
+
+  activity('waiting');
+  const reply = await consume(options.events ?? responseEvents(response, signal), delta => {
+    const visible = profile?.append(delta) ?? delta;
+    if (!profile || visible.trim() || (!profile.previewReady && delta.trim())) activity('writing');
+    if (visible) emit({ id: request.id, type: 'delta', text: visible });
+    previews?.update(profile);
+  }, 'thinking', deepSeekWeb);
+  let usage = reply.usage;
+  if (profile && !reply.text.trim())
+    throw new ProfileOutputError('DeepSeek 返回了空白回答，请重试。');
+  if (!reply.text.trim())
     throw Error('回答未完整返回，已保留收到的内容，请重试。');
   previews?.flush();
-  const proposal = profile && request.profile ? profile.finish(request.profile) : undefined;
+  let proposal = profile && request.profile ? profile.finish(request.profile) : undefined;
+  if (proposal?.delta) {
+    activity('writing');
+    emit({ id: request.id, type: 'delta', text: proposal.delta });
+  }
+  if (proposal?.issue && request.profile) {
+    // Keep the shown answer and its search results; ask only for the missing structure.
+    if (!options.requestStructure) throw new ChatServiceError({ message: proposal.issue });
+    activity('organizing');
+    // A partial proposal from the first reply is not reliable; the follow-up replaces it.
+    if (previewShown) emit({ id: request.id, type: 'profile-preview', preview: {} });
+    previews?.reset();
+    const structure = new DeepSeekProfileStream(true);
+    const followUp = await consume(responseEvents(await options.requestStructure(proposal.answerText), signal), delta => {
+      structure.append(delta);
+      previews?.update(structure);
+    }, 'organizing');
+    usage = addUsage(usage, followUp.usage);
+    previews?.flush();
+    const resolved = structure.finish(request.profile);
+    // Never retry the whole answer here: report the unresolved structure with the answer kept.
+    if (resolved.issue) throw new ChatServiceError({ message: resolved.issue });
+    proposal = { ...proposal, changes: resolved.changes, skillScope: resolved.skillScope, issue: undefined };
+  }
+  const profileChanges = proposal && Object.keys(proposal.changes).length ? proposal.changes : undefined;
+  const sources = deepSeekWeb?.sources ?? new Map<string, ChatSource>();
   const skillSourceIssues = verifySkillProposal(
     request,
-    proposal?.changes,
-    new Map(),
-    false,
+    profileChanges,
+    sources,
+    deepSeekWeb?.completedSearch ?? false,
     proposal?.skillScope,
   );
-  if (proposal?.delta) emit({ id: request.id, type: 'delta', text: proposal.delta });
   if (lastPhase) activity(lastPhase, true);
   return {
-    answerText: profile ? (JSON.parse(profile.raw).answer as string) : text,
-    sources: [],
+    answerText: proposal?.answerText ?? reply.text,
+    sources: [...sources.values()],
     usage,
     activities,
-    profileChanges: proposal?.changes,
+    profileChanges,
     skillSourceIssues,
     warning,
   };

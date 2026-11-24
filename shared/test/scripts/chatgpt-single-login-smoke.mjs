@@ -110,9 +110,9 @@ async function measureFooter(text, footerSelector) {
     const footer = element.closest(selector);
     const divider = selector === '.settings-error'
       ? footer.closest('.ai-services-panel > .interview-reveal[data-open="true"]')
-        ?.previousElementSibling?.querySelector(':scope > .ai-service-row[data-settings-target="copilot"]:last-child')
+        ?.previousElementSibling?.querySelector(':scope > .account-service:last-child:has(> [data-settings-target="copilot"])')
       : footer.previousElementSibling;
-    if (!divider?.matches('.settings-entry') ||
+    if (!divider?.matches('.settings-entry, .account-service') ||
         !parseFloat(getComputedStyle(divider).borderBottomWidth))
       throw Error('Expected a settings row divider above the footer');
     const row = divider.getBoundingClientRect();
@@ -145,7 +145,7 @@ try {
   const local = await waitForRestoredMainWindow(app);
   await local.locator('.sidebar .user-info small').getByText('未连接 AI 服务', {exact:true}).waitFor();
   const localSettings = await openAISettings(local);
-  assert.equal(await localSettings.locator('.ai-service-row').getByText('未连接', {exact:true}).count(), 2);
+  assert.equal(await localSettings.locator('.ai-service-row').getByText('未登录', {exact:true}).count(), 2);
   await assertNoProviderReads();
   await localSettings.getByRole('button', { name: '关闭设置', exact: true }).click();
   page = await returnToUiLogin(app, local, '返回登录');
@@ -155,7 +155,7 @@ try {
   const settings = await openAISettings(page);
   await assertNoProviderReads();
   const connectChatGPT = settings.locator('.ai-service-row').filter({ hasText: 'ChatGPT' })
-    .getByRole('button', { name: '连接', exact: true });
+    .getByRole('button', { name: '登录', exact: true });
   for (const [reason, notice] of [
     ['denied', 'ChatGPT 连接被拒绝，请重启 VoxCue 后重试。'],
     ['unavailable', 'ChatGPT 连接失败，请重启 VoxCue 后重试。'],
@@ -313,7 +313,7 @@ try {
   assert.equal(await app.evaluate(() => globalThis.singleLoginFixture.opens), 1);
   const restoredSettings = await openAISettings(page);
   await restoredSettings.locator('.ai-service-row').filter({ hasText: 'ChatGPT' })
-    .getByRole('button', { name: '断开连接', exact: true }).waitFor();
+    .getByRole('button', { name: '禁用', exact: true }).waitFor();
   await restoredSettings.getByRole('button', { name: '关闭设置', exact: true }).click();
   const calls = await app.evaluate(() => globalThis.singleLoginFixture.chatCalls);
   await page.getByRole('textbox', { name: '聊天消息', exact: true }).fill('Question after restart');
@@ -331,8 +331,8 @@ try {
   assert.equal(await app.evaluate(() => globalThis.singleLoginFixture.opens), 1);
   const disconnectSettings = await openAISettings(page);
   const chatgptRow = disconnectSettings.locator('.ai-service-row').filter({ hasText: 'ChatGPT' });
-  await chatgptRow.getByRole('button', { name: '断开连接', exact: true }).click();
-  const reconnect = chatgptRow.getByRole('button', { name: '连接', exact: true });
+  await chatgptRow.getByRole('button', { name: '退出登录', exact: true }).click();
+  const reconnect = chatgptRow.getByRole('button', { name: '登录', exact: true });
   await app.evaluate(() => { globalThis.failReconnect = true; });
   await reconnect.click();
   await disconnectSettings.getByRole('alert').getByText('ChatGPT 登录未完成，请重试。', {exact:true}).waitFor();
@@ -346,8 +346,8 @@ try {
   assert.equal(await app.evaluate(() => globalThis.singleLoginFixture.opens), 2);
   const reconnectSettings = await openAISettings(page);
   const retryRow = reconnectSettings.locator('.ai-service-row').filter({ hasText: 'ChatGPT' });
-  await retryRow.getByRole('button', {name:'连接',exact:true}).click();
-  await retryRow.getByRole('button', {name:'断开连接',exact:true}).waitFor();
+  await retryRow.getByRole('button', {name:'登录',exact:true}).click();
+  await retryRow.getByRole('button', {name:'禁用',exact:true}).waitFor();
   assert.equal(await app.evaluate(() => globalThis.singleLoginFixture.opens), 3);
   await closeUiApp(app);
   app = undefined;
@@ -359,8 +359,8 @@ try {
   assert.equal(await app.evaluate(() => globalThis.providerReads.copilot), 0);
   const cleanupSettings = await openAISettings(page);
   const cleanupRow = cleanupSettings.locator('.ai-service-row').filter({hasText:'ChatGPT'});
-  await cleanupRow.getByRole('button', {name:'断开连接',exact:true}).click();
-  await cleanupRow.getByRole('button', {name:'连接',exact:true}).waitFor();
+  await cleanupRow.getByRole('button', {name:'退出登录',exact:true}).click();
+  await cleanupRow.getByRole('button', {name:'登录',exact:true}).waitFor();
   await cleanupSettings.getByRole('button', {name:'关闭设置',exact:true}).click();
   assert.equal(await page.getByRole('button', { name: '用户菜单', exact: true }).isVisible(), true);
   page = await returnToUiLogin(app, page, '退出登录');

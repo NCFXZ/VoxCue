@@ -1,6 +1,6 @@
 ## 当前发行源与开源许可
 
-源码按根 LICENSE 的 AGPL-3.0-only 授权，当前更新与组件来源统一为 [NCFXZ/VoxCue Releases](https://github.com/NCFXZ/VoxCue/releases)，客户端匿名读取公开元数据和资产。关于页的“GitHub 仓库”指向源码仓库。模型和独立运行时保留原归档及许可证，不改为 AGPL。
+源码按根 LICENSE 的 AGPL-3.0-only 授权。客户端更新与组件下载按网络出口 IP 分流：中国大陆使用 [CNB 发行仓库](https://cnb.cool/voxcue-release/voxcue-release)，其他地区使用 [NCFXZ/VoxCue Releases](https://github.com/NCFXZ/VoxCue/releases)；两边都匿名读取。CNB 正式客户端发行从 1.3.3 开始，通过公开 raw 索引发现后续版本，原始资产、签名与摘要保持一致。发布工具、模型镜像和验证入口见 [下载渠道](DOWNLOAD_CHANNELS.md)。关于页的“GitHub 仓库”指向源码仓库。模型和独立运行时保留原归档及许可证，不改为 AGPL。
 
 换仓保留固定公钥、签名、摘要和本平台完整稳定资产选择；Mac 清单签名不绑定下载仓库，可复制原资产而不重签。已有旧版的地址写在其二进制内，仍使用旧 VoxCue-releases；旧仓与旧发行继续保留，后续需经正常版本升级或手动安装取得新源。仅提交新源码不会改变已安装程序。
 

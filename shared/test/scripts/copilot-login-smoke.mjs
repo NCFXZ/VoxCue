@@ -139,10 +139,10 @@ async function exerciseServiceModelChoices(app, page) {
   async function switchService(from, to) {
     const settings = await openAISettings(page);
     const row = name => settings.locator('.ai-service-row').filter({ hasText: name });
-    await row(from).getByRole('button', { name: '断开连接', exact: true }).waitFor();
-    await row(to).getByRole('button', { name: '连接', exact: true }).click();
-    await row(to).getByRole('button', { name: '断开连接', exact: true }).waitFor();
-    await row(from).getByRole('button', { name: '连接', exact: true }).waitFor();
+    await row(from).getByRole('button', { name: '禁用', exact: true }).waitFor();
+    await row(to).getByRole('button', { name: /^(登录|启用)$/ }).click();
+    await row(to).getByRole('button', { name: '禁用', exact: true }).waitFor();
+    await row(from).getByRole('button', { name: '启用', exact: true }).waitFor();
     await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
   }
   async function modelChoice(interview, expected, choose) {
@@ -200,11 +200,11 @@ try {
   const referenceLayout = await page.locator('.remote-connection-summary h3').evaluate(titleLayout);
   await page.getByRole('button', { name: 'AI 服务', exact: true }).click();
   const copilotRow = page.locator('.ai-service-row').filter({ hasText: 'GitHub Copilot' });
-  const copilot = copilotRow.getByRole('button', { name: '连接', exact: true });
+  const copilot = copilotRow.getByRole('button', { name: '登录', exact: true });
   const chatGPT = page
     .locator('.ai-service-row')
     .filter({ hasText: 'ChatGPT' })
-    .getByRole('button', { name: '连接', exact: true });
+    .getByRole('button', { name: '登录', exact: true });
   await copilot.waitFor();
   assert.equal(await page.locator('.ai-service-row').count(), 2);
   for (const name of await page.locator('.ai-service-label strong').all()) {
@@ -223,9 +223,12 @@ try {
     return [style.fontSize, style.color];
   };
   assert.deepEqual(await pending.evaluate(textStyle),
-    await copilotRow.getByText('未连接', { exact: true }).evaluate(textStyle));
+    await copilotRow.getByText('未登录', { exact: true }).evaluate(textStyle));
   assert.equal(await copilotRow.locator('.ui-loader').count(), 0);
-  assert.equal(await copilotRow.getByRole('button').count(), 1);
+  assert.equal(await copilotRow.getByRole('button').count(), 2);
+  assert.equal(await copilotRow.locator('.ai-service-label').isDisabled(), true);
+  assert.equal(await copilotRow.locator('.ai-service-label').evaluate(node => getComputedStyle(node).opacity), '1');
+  assert.equal(await copilotRow.getByRole('button', { name: '取消授权', exact: true }).isEnabled(), true);
   assert.equal(await chatGPT.isDisabled(), true);
   await page.getByRole('button', { name: '取消授权', exact: true }).click();
   await page.getByRole('alert').getByText('登录已取消', { exact: false }).waitFor();
@@ -246,7 +249,7 @@ try {
   await page
     .locator('.ai-service-row')
     .filter({ hasText: 'GitHub Copilot' })
-    .getByRole('button', { name: '断开连接', exact: true })
+    .getByRole('button', { name: '禁用', exact: true })
     .waitFor();
   await page.getByRole('button', { name: '关闭设置', exact: true }).click();
   const main = page;
@@ -286,7 +289,7 @@ try {
   await account.getByText('剩余 75%', { exact: true }).waitFor();
   await loading.waitFor({ state: 'hidden' });
   assert.equal(await account.getByRole('button', { name: '重置用量', exact: true }).count(), 0);
-  assert.equal(await account.getByText('Copilot Free', { exact: true }).count(), 1);
+  assert.equal(await account.getByText('Copilot Free额度', { exact: true }).count(), 1);
   assert.equal(await account.getByText('100 AI Credits', { exact: true }).count(), 0);
   assert.equal(
     await account.locator('.account-quota-reset').count(),
@@ -360,7 +363,7 @@ try {
           width: card.getBoundingClientRect().width,
           height: card.getBoundingClientRect().height,
           reset: !!card.querySelector('.account-quota-reset'),
-          panelWidth: card.closest('.usage-panel').getBoundingClientRect().width,
+          panelWidth: card.closest('.quota-body').getBoundingClientRect().width,
           metrics: metrics.map((node) => node.getBoundingClientRect().y),
           color: getComputedStyle(line, '::before').backgroundColor,
           animation: getComputedStyle(line, '::after').animationName,
@@ -404,7 +407,7 @@ try {
         const link = panel.querySelector('.account-usage-link');
         const style = getComputedStyle(link);
         return {
-          panelWidth: panel.getBoundingClientRect().width,
+          panelWidth: panel.querySelector('.quota-body').getBoundingClientRect().width,
           cardWidth: card.getBoundingClientRect().width,
           cardHeight: card.getBoundingClientRect().height,
           metrics: metrics.map((node) => ({
@@ -510,8 +513,8 @@ try {
   await exerciseServiceModelChoices(app, page);
   const restored = await openAISettings(page);
   const restoredCopilot = restored.locator('.ai-service-row').filter({ hasText: 'GitHub Copilot' });
-  await restoredCopilot.getByRole('button', { name: '断开连接', exact: true }).click();
-  await restoredCopilot.getByRole('button', { name: '连接', exact: true }).waitFor();
+  await restoredCopilot.getByRole('button', { name: '退出登录', exact: true }).click();
+  await restoredCopilot.getByRole('button', { name: '登录', exact: true }).waitFor();
   await restored.getByRole('button', { name: '关闭设置', exact: true }).click();
   assert.equal(await page.getByRole('button', { name: '用户菜单', exact: true }).isVisible(), true);
   assert.equal(await app.evaluate(() => globalThis.copilotLoginFixture.logout), 0);
@@ -531,8 +534,8 @@ try {
   await serviceSettings.getByRole('button', { name: 'AI 服务', exact: true }).click();
   const chatGPTRow = serviceSettings.locator('.ai-service-row').filter({ hasText: 'ChatGPT' });
   const copilotReads = await app.evaluate(() => globalThis.copilotLoginFixture.accountReads);
-  await chatGPTRow.getByRole('button', { name: '连接', exact: true }).click();
-  await chatGPTRow.getByRole('button', { name: '断开连接', exact: true }).waitFor();
+  await chatGPTRow.getByRole('button', { name: '启用', exact: true }).click();
+  await chatGPTRow.getByRole('button', { name: '禁用', exact: true }).waitFor();
   assert.equal(await app.evaluate(() => globalThis.copilotLoginFixture.accountReads), copilotReads);
   await serviceSettings.getByRole('button', { name: '关闭设置', exact: true }).click();
   assert.equal((await page.evaluate(() => window.desktop.authSession())).mode, 'chatgpt');
@@ -675,7 +678,7 @@ try {
     await chatAccount.getByText('剩余 90%', { exact: true }).waitFor();
     assert.equal(await chatAccount.getByText('5小时额度', { exact: true }).count(), 0);
     assert.equal(await chatAccount.getByRole('progressbar').count(), 1);
-    assert.equal(await chatAccount.getByText('ChatGPT Pro', { exact: true }).count(), 1);
+    assert.equal(await chatAccount.getByText('ChatGPT Pro额度', { exact: true }).count(), 1);
     await page.screenshot();
   }
   await app.evaluate(() => {

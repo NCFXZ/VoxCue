@@ -1,6 +1,6 @@
 import { InterviewReveal } from './InterviewReveal';
 import { useHeightTransition } from './ui/useHeightTransition';
-import { t } from '../i18n';
+import { t, uiLocale } from '../i18n';
 import { useUpdates } from '../stores/updates';
 import { useEffect, useRef, useState, type MouseEvent } from 'react';
 import githubLogo from '../assets/github.svg?inline';
@@ -10,11 +10,14 @@ import { Download, Loader, Update } from './icons';
 import { DownloadButton } from './DownloadButton';
 import { ActionTransition } from './ActionTransition';
 import { storeUpdateMessage } from '../../electron/contracts/updates';
+import { version } from '../../package.json';
+import { releaseNotesUrl } from '../services/updates';
 
 export function UpdatesPanel({ showVersion = true }: { showVersion?: boolean } = {}) {
   const updates = useUpdates();
   const [linkError, setLinkError] = useState<string | null>(null);
   const repositoryUrl = 'https://github.com/NCFXZ/VoxCue';
+  const changelogUrl = releaseNotesUrl(uiLocale());
   const licenseLinks = [
     {
       label: 'AGPL-3.0-only',
@@ -104,8 +107,15 @@ export function UpdatesPanel({ showVersion = true }: { showVersion?: boolean } =
     <>
       {showVersion && (
         <div className="settings-entry">
-          <strong>{t('当前版本')}</strong>
-          <span className="settings-value">{state?.currentVersion ?? '—'}</span>
+          <strong>VoxCue</strong>
+          <div className="settings-value">
+            <span>{version}</span>
+            <span aria-hidden="true">·</span>
+            <a className="updates-license-link" href={changelogUrl}
+              onClick={(event) => openLink(event, changelogUrl, '无法打开更新日志，请稍后重试。')}>
+              {t('更新日志')}
+            </a>
+          </div>
         </div>
       )}
       <div className="settings-entry">

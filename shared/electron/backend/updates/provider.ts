@@ -9,57 +9,14 @@ import {
   manifestByteLimit,
   releaseAssetUrl,
   releasePageSize,
+  releasePageLimit,
   releaseRepository,
   type ReleaseTarget,
 } from './releases';
 import { platformUpdateInfo, type PlatformUpdateInfo } from './cache';
+import { cnbReleaseIndex, readPublicText, resolveDownloadSource } from '../downloads';
 
 export type ReleaseFetch = typeof fetch;
-
-async function readText(fetcher: ReleaseFetch, url: URL, signal: AbortSignal, limit: number) {
-  signal.throwIfAborted();
-  const response = await fetcher(url, {
-    signal,
-    credentials: 'omit',
-    redirect: 'follow',
-    headers: {
-      Accept:
-        url.hostname === 'api.github.com'
-          ? 'application/vnd.github+json'
-          : 'application/octet-stream',
-    },
-  });
-  if (!response.ok || Number(response.headers.get('content-length')) > limit) {
-    void response.body?.cancel().catch(() => {});
-    throw Error('Release request failed or exceeded size limit');
-  }
-  if (!response.body) throw Error('Empty release response');
-  const reader = response.body.getReader();
-  const abort = () => {
-    void reader.cancel(signal.reason).catch(() => {});
-  };
-  signal.addEventListener('abort', abort, { once: true });
-  const decoder = new TextDecoder('utf-8', { fatal: true });
-  let text = '',
-    bytes = 0;
-  try {
-    for (;;) {
-      signal.throwIfAborted();
-      const chunk = await reader.read();
-      if (chunk.done) break;
-      bytes += chunk.value.byteLength;
-      if (bytes > limit) throw Error('Release response exceeded size limit');
-      text += decoder.decode(chunk.value, { stream: true });
-    }
-    signal.throwIfAborted();
-    return text + decoder.decode();
-  } finally {
-    signal.removeEventListener('abort', abort);
-    // A stalled transport cleanup must not outlive the response limit/deadline.
-    void reader.cancel().catch(() => {});
-    reader.releaseLock();
-  }
-}
 
 /** Fixed public feed lookup shared by the independent platform installers. */
 export async function fetchPlatformUpdate(
@@ -68,14 +25,30 @@ export async function fetchPlatformUpdate(
   fetcher: ReleaseFetch,
 ) {
   const signal = AbortSignal.any([lifetime, AbortSignal.timeout(45000)]);
-  const candidate = await latestPlatformRelease(target, async (page) => {
+  const source = await resolveDownloadSource(fetcher, signal);
+  let releases: unknown[] | undefined;
+  if (source === 'cnb') {
+    const index = JSON.parse(
+      await readPublicText(fetcher, new URL(cnbReleaseIndex), signal, 2 * 1024 * 1024),
+    );
+    if (
+      index?.schemaVersion !== 1 ||
+      !Array.isArray(index.releases) ||
+      index.releases.length >= releasePageSize * releasePageLimit
+    )
+      throw Error('Invalid CNB release index');
+    releases = index.releases;
+  }
+  const selectedRelease = await latestPlatformRelease(target, async (page) => {
+    if (releases) return releases.slice((page - 1) * releasePageSize, page * releasePageSize);
     const url = new URL(`https://api.github.com/repos/${releaseRepository}/releases`);
     url.searchParams.set('per_page', String(releasePageSize));
     url.searchParams.set('page', String(page));
-    return JSON.parse(await readText(fetcher, url, signal, 8 * 1024 * 1024));
+    return JSON.parse(await readPublicText(fetcher, url, signal, 8 * 1024 * 1024));
   });
+  const candidate = source === 'cnb' ? { ...selectedRelease, source } : selectedRelease;
   const url = releaseAssetUrl(candidate, candidate.manifest);
-  const raw = await readText(fetcher, url, signal, manifestByteLimit);
+  const raw = await readPublicText(fetcher, url, signal, manifestByteLimit);
   const metadata = parseUpdateInfo(raw, candidate.manifest, url);
   const selected = manifestFile(metadata, candidate);
   signal.throwIfAborted();

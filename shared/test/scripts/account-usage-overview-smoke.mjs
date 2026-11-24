@@ -283,7 +283,7 @@ try {
   await settings
     .locator('.ai-service-row')
     .filter({ hasText: 'GitHub Copilot' })
-    .getByRole('button', { name: '断开连接', exact: true })
+    .getByRole('button', { name: '退出登录', exact: true })
     .click();
   await main.locator('.user-info small').getByText('未连接 AI 服务', { exact: true }).waitFor();
   await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
@@ -295,8 +295,10 @@ try {
   await settings.getByRole('heading', { name: 'AI 服务', exact: true }).waitFor();
   for (const provider of ['chatgpt', 'copilot']) {
     await settings.locator(`[data-settings-target="${provider}"]`)
-      .getByRole('button', { name: '连接', exact: true }).waitFor();
+      .getByRole('button', { name: provider === 'chatgpt' ? '启用' : '登录', exact: true }).waitFor();
   }
+  assert.deepEqual(await main.evaluate(async () =>
+    (await window.desktop.accountConnections()).map(account => account.service).sort()), ['chatgpt']);
   assert.equal(await dialog().count(), 0, 'An account without an AI connection cannot enter the interview');
   assert.equal(records.length, 34);
   assert.deepEqual(errors, []);

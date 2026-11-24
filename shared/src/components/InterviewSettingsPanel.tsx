@@ -120,9 +120,9 @@ export function InterviewSettingsPanel({ onClose, targets }: { onClose(): void; 
         onChange={(mode) => void changeInputMode(mode)}
         disabled={audioBusy || state.speech.state === 'loading' || state.status === 'ended'}
       />
-      <section ref={audioSection} className="interview-settings-section interview-audio-settings" data-settings-highlight-group>
+      <section ref={audioSection} className="interview-settings-section interview-audio-settings">
         <h3>{t('音频设置')}</h3>
-        <div className="audio-device-editor" data-settings-target="audio-devices">
+        <div className="audio-device-editor" data-settings-target="audio-devices" data-settings-highlight-group>
           {(['system', 'microphone'] as const).map((source) => (
             <label className="speech-setting-row" key={source} data-settings-target={source}>
               <div className="interview-device-label">

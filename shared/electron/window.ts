@@ -98,11 +98,14 @@ export function windowOptions(
 }
 
 export function restrictWindowNavigation(win: Pick<BrowserWindow, 'webContents'>) {
-  const resetZoom = () => win.webContents.setZoomFactor(1);
+  const contents = win.webContents;
+  const resetZoom = () => {
+    if (!contents.isDestroyed()) contents.setZoomFactor(1);
+  };
   resetZoom();
-  void win.webContents.setVisualZoomLevelLimits(1, 1);
-  win.webContents.on('did-finish-load', resetZoom);
-  win.webContents.on('before-input-event', (event, input) => {
+  void contents.setVisualZoomLevelLimits(1, 1);
+  contents.on('did-finish-load', resetZoom);
+  contents.on('before-input-event', (event, input) => {
     if (
       (input.control || input.meta) &&
       !input.alt &&
@@ -112,12 +115,12 @@ export function restrictWindowNavigation(win: Pick<BrowserWindow, 'webContents'>
       resetZoom();
     }
   });
-  win.webContents.on('zoom-changed', (event) => {
+  contents.on('zoom-changed', (event) => {
     event.preventDefault();
     resetZoom();
   });
-  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-  win.webContents.on('will-navigate', (event) => event.preventDefault());
+  contents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  contents.on('will-navigate', (event) => event.preventDefault());
 }
 
 /** Keep every quit attempt behind the same retirement barrier. */

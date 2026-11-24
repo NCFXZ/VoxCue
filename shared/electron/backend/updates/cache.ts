@@ -40,6 +40,8 @@ export function validatePlatformUpdate(value: unknown, target: ReleaseTarget): P
   const candidate = info?.selectedRelease;
   if (!candidate || !Number.isFinite(candidate.publishedAt) || !candidate.binary)
     throw Error('Invalid cached platform release');
+  if (candidate.source !== undefined && candidate.source !== 'github' && candidate.source !== 'cnb')
+    throw Error('Invalid cached download source');
   const candidates = releaseCandidates(
     [
       {
@@ -62,7 +64,7 @@ export function validatePlatformUpdate(value: unknown, target: ReleaseTarget): P
     (entry) => entry.version === candidate.version && entry.manifest === candidate.manifest,
   );
   if (!selected) throw Error('Cached release does not belong to this platform');
-  return platformUpdateInfo(selected, value);
+  return platformUpdateInfo({ ...selected, ...(candidate.source ? { source: candidate.source } : {}) }, value);
 }
 
 interface CacheState {

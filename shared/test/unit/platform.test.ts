@@ -245,6 +245,7 @@ describe('桌面平台边界', () => {
   });
   it('每类窗口拒绝新窗口和导航，加载入口及 hash 保持一致', () => {
     const contents = {
+      isDestroyed: vi.fn(() => false),
       setWindowOpenHandler: vi.fn(),
       on: vi.fn(),
       setZoomFactor: vi.fn(),
@@ -278,5 +279,33 @@ describe('桌面平台边界', () => {
         role === 'main' ? ['/index.html'] : ['/index.html', { hash: role }],
       );
     }
+  });
+  it('ignores queued zoom events after a failed loading window has been destroyed', () => {
+    let destroyed = false;
+    const contents = Object.assign(new EventEmitter(), {
+      isDestroyed: () => destroyed,
+      setZoomFactor: vi.fn(() => {
+        if (destroyed) throw Error('Dead webContents operation');
+      }),
+      setVisualZoomLevelLimits: vi.fn(async () => {}),
+      setWindowOpenHandler: vi.fn(),
+    });
+    const win = {
+      get webContents() {
+        if (destroyed) throw Error('Dead window getter');
+        return contents;
+      },
+    };
+    restrictWindowNavigation(win as unknown as Parameters<typeof restrictWindowNavigation>[0]);
+    contents.emit('did-finish-load');
+    expect(contents.setZoomFactor).toHaveBeenCalledTimes(2);
+    destroyed = true;
+    expect(() => contents.emit('did-finish-load')).not.toThrow();
+    for (const event of ['zoom-changed', 'before-input-event']) {
+      const blocked = { preventDefault: vi.fn() };
+      expect(() => contents.emit(event, blocked, { key: '+', control: true })).not.toThrow();
+      expect(blocked.preventDefault).toHaveBeenCalledOnce();
+    }
+    expect(contents.setZoomFactor).toHaveBeenCalledTimes(2);
   });
 });

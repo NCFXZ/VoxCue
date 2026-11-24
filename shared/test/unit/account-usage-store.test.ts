@@ -3,6 +3,31 @@ import { useChatConnection } from '../../src/stores/chatConnection';
 import { copilotAccountUsage } from '../../electron/backend/copilot/quota';
 import { CHAT_MODEL_CATALOG_TTL_MS, type ChatModel } from '../../electron/contracts/chat';
 const catalog = (id: string) => ({ ok: true, models: [{ id, label: id, description: '' }] });
+
+it('reads an inactive account quota without changing the active service or sidebar usage', async () => {
+  const usage = copilotAccountUsage({ planTier: 'edu' });
+  const read = vi.fn(async () => ({ ok: true, usage }));
+  vi.stubGlobal('window', { desktop: { chatAccountUsage: read } });
+  useChatConnection.setState({ service: 'openai', live: true, usage: null });
+  await useChatConnection.getState().refreshSavedUsage('copilot');
+  expect(read).toHaveBeenCalledExactlyOnceWith('copilot');
+  expect(useChatConnection.getState()).toMatchObject({
+    service: 'openai', usage: null,
+    savedUsage: { copilot: { usage, loadingUsage: false, usageError: null } },
+  });
+});
+it('discards an inactive quota result after its panel closes, and deduplicates overlapping reads', async () => {
+  let finish!: (value: any) => void;
+  const read = vi.fn(() => new Promise(resolve => { finish = resolve; }));
+  vi.stubGlobal('window', { desktop: { chatAccountUsage: read } });
+  const first = useChatConnection.getState().refreshSavedUsage('copilot');
+  await useChatConnection.getState().refreshSavedUsage('copilot');
+  expect(read).toHaveBeenCalledTimes(1);
+  useChatConnection.getState().clearSavedUsage('copilot');
+  finish({ ok: true, usage: copilotAccountUsage({ planTier: 'edu' }) });
+  await first;
+  expect(useChatConnection.getState().savedUsage.copilot).toBeUndefined();
+});
 afterEach(async () => {
   await useChatConnection.getState().load(false);
   vi.unstubAllGlobals();

@@ -4,59 +4,6 @@ const path = require('node:path');
 // Representative public model records in each vendor's wire format. The
 // real provider adapters determine names, eligibility and reasoning controls.
 const openai = { data: ['gpt-6.2-sol', 'gpt-6.2-astra', 'gpt-6.1-terra'].map((id) => ({ id })) };
-const supported = { supported: true };
-const anthropic = {
-  data: [
-    {
-      id: 'claude-opus-5-5',
-      display_name: 'Claude Opus 5.5',
-      capabilities: {
-        image_input: supported,
-        pdf_input: supported,
-        thinking: { types: { adaptive: supported, disabled: { supported: false } } },
-        effort: Object.fromEntries(
-          ['low', 'medium', 'high', 'xhigh', 'max'].map((level) => [level, supported]),
-        ),
-      },
-    },
-    {
-      id: 'claude-haiku-4-5-20251001',
-      display_name: 'Claude Haiku 4.5',
-      capabilities: {
-        image_input: supported,
-        pdf_input: supported,
-        thinking: { types: { enabled: supported, disabled: supported } },
-      },
-    },
-  ],
-  has_more: false,
-};
-const gemini = {
-  models: [
-    ['gemini-4-neon', 'Gemini 4 Neon'],
-    ['gemini-3.1-flash-lite', 'Gemini 3.1 Flash-Lite'],
-  ].map(([id, displayName]) => ({
-    name: 'models/' + id,
-    displayName,
-    thinking: true,
-    supportedGenerationMethods: ['generateContent'],
-  })),
-};
-const qwen = {
-  output: {
-    total: 2,
-    models: ['qwen4-max', 'qwen-plus'].map((model) => ({
-      model,
-      name: model,
-      provider: 'qwen',
-      capabilities: ['TG', 'Reasoning'],
-      inference_metadata: {
-        request_modality: model === 'qwen4-max' ? ['Text', 'Image'] : ['Text'],
-        response_modality: ['Text'],
-      },
-    })),
-  },
-};
 const deepseek = {
   data: [
     ['deepseek-flash', 'DeepSeek-V4.1-Flash'],
@@ -69,35 +16,38 @@ const deepseek = {
     output_modalities: ['text'],
   })),
 };
-const kimi = { data: ['kimi-k3.1-pro', 'kimi-k2.6'].map((id) => ({ id })) };
-const glm = { data: ['glm-5.3', 'glm-5.2'].map((id) => ({ id })) };
-const doubao = {
-  data: [
-    {
-      id: 'doubao-seed-2-1-pro-260628',
-      modalities: { input_modalities: ['text', 'image'], output_modalities: ['text'] },
-      features: { thinking: { type: 'enabled' } },
-      effort: { supported_levels: ['minimal', 'low', 'medium', 'high'] },
-    },
-    {
-      id: 'doubao-seed-character-251128',
-      modalities: { input_modalities: ['text'], output_modalities: ['text'] },
-    },
-  ],
-};
-const catalogs = { openai, anthropic, gemini, qwen, deepseek, kimi, glm, doubao };
+const catalogs = { openai, deepseek };
 const usage = { prompt_tokens: 48, completion_tokens: 24, total_tokens: 72 };
+const profilePreview = {
+  request: '请将简历摘要改成一段用于合成流式验证的内容。',
+  prefix: '这是一段用于流式验证的合成简历。',
+  suffix: '收到后续片段后才具备完整内容。',
+};
+// Synthetic DeepSeek preparation scenarios. A gated stream pauses after its first chunk
+// until the UI check releases it, so visible text must come from incremental output.
+const deepSeekPreparation = {
+  answer: {
+    request: '请分段回答：我的优势是什么？',
+    first: '合成优势一：能把检测软件的问题拆解清楚。',
+    rest: '合成优势二：能持续维护回归测试。',
+  },
+  role: /^(?:把目标岗位改成|不对，改成)(.+?)。?$/u,
+  retained: '[本机操作状态：用户已拒绝这份提案并保留旧资料',
+  // A searched answer that omits the intent line; only a structure follow-up may complete it.
+  unlabeled: {
+    request: '请联网查一下合成框架的最新消息',
+    answer: '合成框架最新公告：发布了合成版本的维护说明。',
+  },
+  followUp: '【应用补充请求，不是用户发言】',
+};
+const intent = (kind) => '<profile_intent>' + kind + '</profile_intent>';
+const proposal = (answer, changes) =>
+  intent('proposal') + '\n' + answer + '\n<profile_proposal>\n' +
+  JSON.stringify({ changes, skillScope: null }) + '\n</profile_proposal>';
 const routes = {
   openai: ['api.openai.com', '/v1/models', '/v1/responses'],
-  anthropic: ['api.anthropic.com', '/v1/models', '/v1/messages'],
-  gemini: ['generativelanguage.googleapis.com', '/v1beta/models', '/v1beta/openai/chat/completions'],
-  qwen: [null, '/api/v1/models', '/compatible-mode/v1/chat/completions'],
   deepseek: ['api.deepseek.com', '/models', '/chat/completions', '/user/balance'],
-  kimi: ['api.moonshot.cn', '/v1/models', '/v1/chat/completions', '/v1/users/me/balance'],
-  glm: ['open.bigmodel.cn', '/api/paas/v4/models', '/api/paas/v4/chat/completions'],
-  doubao: ['ark.cn-beijing.volces.com', '/api/v3/models', '/api/v3/chat/completions'],
 };
-const qwenHost = /^(?:dashscope(?:-intl|-us)?\.aliyuncs\.com|cn-hongkong\.dashscope\.aliyuncs\.com|[a-z0-9-]+\.(?:cn-beijing|ap-southeast-1|us-east-1|ap-northeast-1|cn-hongkong|eu-central-1)\.maas\.aliyuncs\.com)$/;
 
 function transport(provider, key = 'preview-only') {
   // No external transport exists in this function, including for unexpected routes.
@@ -107,13 +57,10 @@ function transport(provider, key = 'preview-only') {
     const [host, models, chat, balance] = routes[provider];
     const method = options.method ?? 'GET';
     if (url.protocol !== 'https:' || url.port || url.username || url.password ||
-        (provider === 'qwen' ? !qwenHost.test(url.hostname) : url.hostname !== host))
+        url.hostname !== host)
       throw Error('模拟请求的服务地址与所选厂商不符。');
     const headers = new Headers(options.headers);
-    const googleCatalog = provider === 'gemini' && url.pathname === models;
-    const authorized = googleCatalog ? headers.get('x-goog-api-key') === key && !headers.has('authorization') :
-      headers.get('authorization') === 'Bearer ' + key;
-    if (!authorized || (provider === 'anthropic' && headers.get('anthropic-version') !== '2026-10-21'))
+    if (headers.get('authorization') !== 'Bearer ' + key)
       throw Error('模拟请求未使用所选厂商的鉴权方式。');
     if (method === 'GET' && url.pathname === models) return Response.json(catalogs[provider]);
     if (method === 'GET' && provider === 'deepseek' && url.pathname === balance)
@@ -127,66 +74,96 @@ function transport(provider, key = 'preview-only') {
           },
         ],
       });
-    if (method === 'GET' && provider === 'kimi' && url.pathname === balance)
-      return Response.json({
-        code: 0,
-        data: { available_balance: 32.8, voucher_balance: 2.8, cash_balance: 30 },
-      });
-    if (method !== 'POST' || url.pathname !== chat)
+    const deepSeekResponses = provider === 'deepseek' && url.pathname === '/responses';
+    if (method !== 'POST' || (url.pathname !== chat && !deepSeekResponses))
       throw Error('此操作未包含在离线预览中。');
     const body = JSON.parse(options.body);
-    const messages = provider === 'openai' ? body.input : body.messages;
-    if (body.stream !== true || typeof body.model !== 'string' || !Array.isArray(messages) ||
+    const model = body.model;
+    const responses = provider === 'openai' || deepSeekResponses;
+    const messages = responses ? body.input : body.messages;
+    if (body.stream !== true || typeof model !== 'string' || !Array.isArray(messages) ||
         !messages.some(message => message.role === 'user') || headers.get('content-type') !== 'application/json')
       throw Error('模拟请求缺少流式对话所需的字段。');
-    const declaredEffort = provider === 'openai' ? body.reasoning?.effort :
-      provider === 'anthropic' ? body.output_config?.effort : body.reasoning_effort;
+    const declaredEffort = responses ? body.reasoning?.effort : body.reasoning_effort;
     const effort = declaredEffort ?? (body.enable_thinking === true || body.thinking?.type === 'enabled'
         ? 'on'
         : body.enable_thinking === false || body.thinking?.type === 'disabled'
           ? 'none'
           : 'auto');
-    const answer = '当前模型为 ' + body.model + '，思考设置为 ' + effort + '。这是模拟回答。';
+    const answer = '当前模型为 ' + model + '，思考设置为 ' + effort + '。这是模拟回答。';
     const system =
       body.instructions ??
-      body.system ??
       body.messages?.find((m) => m.role === 'system')?.content ??
       '';
-    const text =
-      body.text?.format?.type === 'json_schema' || system.includes('JSON Schema')
-        ? JSON.stringify({ answer, changes: {}, skillScope: null })
-        : answer;
+    const format = responses ? body.text?.format?.type : body.response_format?.type;
+    const json = provider === 'openai' && (format === 'json_schema' || system.includes('JSON Schema'));
+    // DeepSeek preparation uses its text protocol: intent line, visible answer, optional proposal.
+    const deepSeekProfile = provider === 'deepseek' && system.includes(intent('none'));
+    if (deepSeekProfile && (format || body.response_format))
+      throw Error('模拟 DeepSeek 资料请求不应启用 JSON 输出格式。');
+    const lastUser = messages.findLast(message => message.role === 'user')?.content;
+    const prompt = typeof lastUser === 'string' ? lastUser : '';
+    const probe = provider === 'deepseek' && prompt.includes(profilePreview.request);
+    if (probe && !deepSeekProfile) throw Error('模拟资料请求缺少 DeepSeek 资料协议。');
+    const role = deepSeekProfile ? deepSeekPreparation.role.exec(prompt)?.[1] : undefined;
+    if (role && prompt.startsWith('不对') && !messages.some(message => message.role === 'assistant' &&
+        String(message.content).includes(deepSeekPreparation.retained)))
+      throw Error('模拟请求缺少上一份提案已保留原资料的本机状态。');
+    const answerProbe = deepSeekProfile && prompt === deepSeekPreparation.answer.request;
+    const unlabeled = deepSeekProfile && prompt === deepSeekPreparation.unlabeled.request;
+    if (unlabeled && !body.tools?.length) throw Error('模拟联网请求缺少搜索工具。');
+    const followUp = deepSeekProfile && prompt.startsWith(deepSeekPreparation.followUp);
+    if (followUp) {
+      if (body.tools || messages.at(-2)?.role !== 'assistant') throw Error('模拟结构补问的请求不完整。');
+      globalThis.apiStructureFollowUps = (globalThis.apiStructureFollowUps ?? 0) + 1;
+    }
+    const text = followUp
+      ? intent('none')
+      : unlabeled
+        ? deepSeekPreparation.unlabeled.answer
+        : probe
+          ? proposal(answer, { background: profilePreview.prefix + profilePreview.suffix })
+          : role
+            ? proposal('已生成职位描述的修改提案，确认保存前资料保持原值。', { jobDescription: role })
+            : answerProbe
+              ? intent('none') + '\n' + deepSeekPreparation.answer.first + deepSeekPreparation.answer.rest
+              : deepSeekProfile
+                ? intent('none') + '\n' + answer
+                : json ? JSON.stringify({ answer, changes: {
+                  name: null, language: null, background: null, jobDescription: null, customInstructions: null, skills: null,
+                }, skillScope: null }) : answer;
+    const gate = probe || answerProbe ? Promise.withResolvers() : undefined;
+    if (gate) globalThis[probe ? 'finishApiProfilePreview' : 'finishApiAnswerStream'] = gate.resolve;
     const id = 'demo-' + randomUUID();
-    const chunks = text.match(/[\s\S]{1,8}/gu);
+    const boundary = probe
+      ? text.indexOf(profilePreview.prefix) + profilePreview.prefix.length
+      : text.indexOf(deepSeekPreparation.answer.first) + deepSeekPreparation.answer.first.length;
+    const chunks = gate
+      ? [text.slice(0, boundary), text.slice(boundary)]
+      : text.match(/[\s\S]{1,8}/gu);
+    const itemId = 'message-' + id;
     const events =
-      provider === 'openai'
+      responses
         ? [
-            ...chunks.map((delta) => ({ type: 'response.output_text.delta', delta })),
+            ...chunks.map((delta) => ({
+              type: 'response.output_text.delta',
+              delta,
+              ...(deepSeekResponses ? { item_id: itemId, output_index: 0, content_index: 0 } : {}),
+            })),
             {
               type: 'response.completed',
               response: {
                 id,
                 status: 'completed',
-                output: [],
+                output: deepSeekResponses ? [{
+                  id: itemId, type: 'message', role: 'assistant', phase: 'final_answer',
+                  content: [{ type: 'output_text', text }],
+                }] : [],
                 usage: { input_tokens: 48, output_tokens: 24, total_tokens: 72 },
               },
             },
           ]
-        : provider === 'anthropic'
-          ? [
-              { type: 'message_start', message: { id, usage: { input_tokens: 48 } } },
-              ...chunks.map((text) => ({
-                type: 'content_block_delta',
-                delta: { type: 'text_delta', text },
-              })),
-              {
-                type: 'message_delta',
-                delta: { stop_reason: 'end_turn' },
-                usage: { output_tokens: 24 },
-              },
-              { type: 'message_stop' },
-            ]
-          : [
+        : [
               ...chunks.map((content) => ({ id, choices: [{ delta: { content } }] })),
               { id, choices: [{ delta: {}, finish_reason: 'stop' }], usage },
             ];
@@ -198,12 +175,14 @@ function transport(provider, key = 'preview-only') {
       new ReadableStream({
         async pull(controller) {
           await pause(36);
+          if (index === 1) await gate?.promise;
           if (closed) return;
           if (options.signal?.aborted || index >= events.length) return controller.close();
           controller.enqueue(encoder.encode('data: ' + JSON.stringify(events[index++]) + '\n\n'));
         },
         cancel() {
           closed = true;
+          gate?.resolve();
         },
       }),
       { headers: { 'content-type': 'text/event-stream' } },
@@ -225,23 +204,18 @@ function install(root, profile) {
   const load = (name) => require(path.join(root, 'dist-electron/shared/electron', name + '.js'));
   const { apiProviderIds } = load('contracts/apiConnections');
   const { ApiCredentialStore } = load('backend/api/credentials');
-  const configs = new Map(
-    apiProviderIds.map((provider) => [
-      provider,
-      provider === 'qwen' ? { provider, region: 'beijing' } : { provider },
-    ]),
-  );
+  const configs = new Map(apiProviderIds.map(provider => [provider, { provider }]));
   Object.assign(ApiCredentialStore.prototype, {
     async list() {
       return [...configs.values()].map((entry) => ({ ...entry }));
     },
     async read(provider) {
       const entry = configs.get(provider);
-      return entry ? { ...entry, key: 'preview-only' } : null;
+      return entry ? { key: 'preview-only' } : null;
     },
-    async save(provider, { region, workspace }, signal) {
+    async save(provider, _credential, signal) {
       signal?.throwIfAborted();
-      configs.set(provider, { provider, region, workspace });
+      configs.set(provider, { provider });
     },
     async remove(provider) {
       configs.delete(provider);
@@ -365,4 +339,4 @@ function install(root, profile) {
   Object.assign(CopilotRuntime.prototype, { control: unavailable, client: unavailable });
 }
 
-module.exports = { install, transport };
+module.exports = { install, profilePreview, deepSeekPreparation, transport };

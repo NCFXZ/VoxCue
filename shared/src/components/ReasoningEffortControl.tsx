@@ -197,7 +197,6 @@ export function ModelReasoningControl(selection: ModelProps) {
         <div key={panel} className="reasoning-popup-view" data-panel={panel}>
           {panel === 'models' ? (
             <>
-              {api && model?.provider && <div className="reasoning-source">{t(model.provider.name)}</div>}
               <Menu.RadioGroup
                 role="menu"
                 aria-label={t('选择模型')}

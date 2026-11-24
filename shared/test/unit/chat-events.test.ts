@@ -26,6 +26,28 @@ it('shows the first delta immediately and batches subsequent text without losing
   expect(send).toHaveBeenCalledTimes(5);
 });
 
+it('shows replacement text immediately and drops text queued for the previous draft', async () => {
+  vi.useFakeTimers();
+  const send = vi.fn();
+  const events = batchChatEvents(send, new AbortController().signal, () => true);
+  const first = { id: 'request', type: 'delta' as const, text: 'First draft' };
+  const replacement = { id: 'request', type: 'delta' as const, text: 'New draft', replace: true as const };
+
+  events.emit(first);
+  events.emit({ ...first, text: 'Queued old continuation' });
+  await vi.advanceTimersByTimeAsync(25);
+  events.emit(replacement);
+  expect(send.mock.calls).toEqual([[first], [replacement]]);
+
+  events.emit({ ...first, text: ' with' });
+  events.emit({ ...first, text: ' a continuation' });
+  await vi.advanceTimersByTimeAsync(15);
+  expect(send).toHaveBeenCalledTimes(2);
+  await vi.advanceTimersByTimeAsync(25);
+  expect(send).toHaveBeenCalledTimes(3);
+  expect(send).toHaveBeenLastCalledWith({ ...first, text: ' with a continuation' });
+});
+
 it.each(['cancel', 'replace'] as const)('drops queued text after ownership %s', async (kind) => {
   vi.useFakeTimers();
   const send = vi.fn();
@@ -36,6 +58,7 @@ it.each(['cancel', 'replace'] as const)('drops queued text after ownership %s', 
   events.emit({ id: 'old', type: 'delta', text: 'Stale queued text' });
   if (kind === 'cancel') controller.abort();
   else current = false;
+  events.emit({ id: 'old', type: 'delta', text: 'Stale replacement', replace: true });
   await vi.advanceTimersByTimeAsync(100);
   events.finish();
   events.emit({ id: 'old', type: 'delta', text: 'Late provider event' });

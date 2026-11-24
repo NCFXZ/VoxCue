@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import { testRoot, electron } from './test-workspace.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
-import { installUiAccount, connectUiAccount, closeUiApp } from './install-ui-account.mjs';
+import { installUiAccount, connectUiAccount, closeUiApp, showInterviewWindow } from './install-ui-account.mjs';
 import { captureRequested } from './capture-requested.mjs';
 
 const app = await electron.launch({
@@ -189,7 +189,7 @@ try {
   assert.equal(await settings.getByText(/面试额度|激活码|兑换|云端数据保留至/).count(), 0);
   await settings.getByRole('button', { name: 'AI 服务', exact: true }).click();
   const headingSize = await settings
-    .locator('.settings-usage > header strong')
+    .locator('.settings-usage .account-usage-card > header strong')
     .evaluate((e) => getComputedStyle(e).fontSize);
   const serviceSize = await settings
     .locator('.ai-service-label strong')
@@ -387,7 +387,7 @@ try {
   const usageNotice = floating.locator('.floating-usage-notice');
   const twoLowQuotas = 'ChatGPT 剩余: 5小时 19% · 每周 15%';
   await usageNotice.getByText(twoLowQuotas, { exact: true }).waitFor();
-  await floating.getByRole('button', { name: '关闭截图保护', exact: true }).click();
+  await showInterviewWindow(floating);
   await floating.locator('.floating-capture-notice').waitFor();
   const settledNotices = async (count) => {
     await floating.waitForFunction((expected) => {
@@ -524,7 +524,7 @@ try {
   await usageNotice.getByText('ChatGPT 剩余: 5小时 19%', { exact: true }).waitFor();
   await assertWarningColor(usageNotice, true);
   await captureRequested(floating, 'threshold-floating-19');
-  await floating.getByRole('button', { name: '关闭截图保护', exact: true }).click();
+  await showInterviewWindow(floating);
   await floating.locator('.floating-capture-notice').waitFor();
   await app.evaluate(() => {
     globalThis.freeUsage = {
@@ -563,7 +563,7 @@ try {
     .locator('.user-info small')
     .getByText('ChatGPT 已连接', { exact: true })
     .waitFor();
-  await settings.getByRole('button', { name: '断开连接', exact: true }).click();
+  await settings.getByRole('button', { name: '退出登录', exact: true }).click();
   await main.locator('.user-info small').getByText('未连接 AI 服务', { exact: true }).waitFor();
   assert.deepEqual(await app.evaluate(() => globalThis.paidCalls), []);
   assert.deepEqual(errors, []);

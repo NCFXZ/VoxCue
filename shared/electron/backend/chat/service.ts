@@ -15,6 +15,7 @@ import { ResponseText } from './responseText';
 import { invalidCatalog, openAIModels, type OpenAIAccess, type OpenAIModel } from './models';
 import { ModelCatalog } from './modelCatalog';
 import { profileFormat, profileContext, profileSchemaInstructions, ProfileAnswerStream } from './profile';
+import { recoverApiProfileOutput } from './profileRecovery';
 import { ProfilePreviews } from './profilePreviews';
 import { verifySkillProposal } from './proposal';
 import type { UsageLedger } from './usage';
@@ -137,6 +138,9 @@ export class ChatGPTService implements AIChatService {
   async stream(value: unknown, emit: (event: ChatEvent) => void, signal: AbortSignal) {
     const scope = this.catalog.signal(signal);
     try {
+      if (this.dependencies.provider?.id === 'openai')
+        return await recoverApiProfileOutput(validateRequest(value), emit, scope,
+          (request, publish, attemptSignal) => this.run(request, publish, attemptSignal));
       return await this.run(value, emit, scope);
     } catch (error) {
       if (!scope.aborted && invalidatesModelCatalog(error)) this.catalog.expire();
@@ -297,7 +301,8 @@ export class ChatGPTService implements AIChatService {
       let outputLength = 0;
       let answerText = '';
       const streamedText = new ResponseText();
-      let profileStream = request.profile ? new ProfileAnswerStream() : undefined;
+      const apiProfile = this.dependencies.provider?.id === 'openai';
+      let profileStream = request.profile ? new ProfileAnswerStream(apiProfile) : undefined;
       using previews = profileStream && new ProfilePreviews(request.id, emit, deadline);
       let refused = false;
       let lastActivity = '';
@@ -437,7 +442,7 @@ export class ChatGPTService implements AIChatService {
               // The final result replaces the visible draft in both chat and interview.
               // Rebuild validated profile JSON without emitting the same answer twice.
               previews?.reset();
-              if (profileStream) profileStream = new ProfileAnswerStream();
+              if (profileStream) profileStream = new ProfileAnswerStream(apiProfile);
               answerText = '';
               outputLength = 0;
               refused = false;

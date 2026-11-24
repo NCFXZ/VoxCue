@@ -779,21 +779,24 @@ try {
       );
       await settings.getByRole('button', { name: 'AI 服务', exact: true }).click();
       await settings.getByRole('heading', { name: 'AI 服务', exact: true }).waitFor();
-      assert.equal(await settings.getByRole('button', { name: '连接', exact: true }).count(), 2);
+      assert.equal(await settings.getByRole('button', { name: '登录', exact: true }).count(), 2);
       for (const label of ['ChatGPT', 'GitHub Copilot']) {
         const row = settings.locator('.settings-entry').filter({ hasText: label });
-        await row.getByRole('button', { name: '连接', exact: true }).click();
-        await row.getByRole('button', { name: '断开连接', exact: true }).waitFor();
+        await row.getByRole('button', { name: '登录', exact: true }).click();
+        await row.getByRole('button', { name: '禁用', exact: true }).waitFor();
         assert.equal(
           (await main.evaluate(() => window.desktop.cloudAccount({ action: 'status' }))).state.user
             .email,
           'synthetic@example.test',
         );
       }
-      await settings.getByRole('button', { name: '断开连接', exact: true }).click();
+      const selectedService = settings.getByRole('group', { name: 'GitHub Copilot', exact: true });
+      await selectedService.getByRole('button', { name: '退出登录', exact: true }).click();
       await main.getByRole('navigation', { name: '主导航' }).waitFor();
       assert.equal(await main.evaluate(() => window.desktop.authSession()), null);
-      assert.equal(await settings.getByText('synthetic@example.test', { exact: true }).count(), 0);
+      assert.equal(await selectedService.getByText('synthetic@example.test', { exact: true }).count(), 0);
+      await settings.getByRole('group', { name: 'ChatGPT', exact: true })
+        .getByRole('button', { name: '退出登录', exact: true }).waitFor();
       await settings.getByRole('button', { name: 'VoxCue 账号', exact: true }).click();
       const foreignOwner = 'a0000000-0000-4000-8000-000000000002';
       await main.evaluate(

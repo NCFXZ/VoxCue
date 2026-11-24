@@ -627,24 +627,37 @@ try {
   assert.deepEqual(await recordingsForFixture(main), []);
   const dismissNotice = localNotice(main).getByRole('button', { name: '不再提醒本地资料迁移' });
   await main.mouse.move(0, 0);
+  const noticeButtonFill = await localNotice(main).getByRole('button', { name: '前往设置' })
+    .evaluate(button => getComputedStyle(button).backgroundColor);
+  assert.equal(await dismissNotice.innerText(), '不再显示');
+  assert.deepEqual(await dismissNotice.locator('svg').evaluate(icon => {
+    const box = icon.getBoundingClientRect();
+    return [box.width, box.height];
+  }), [16, 16]);
   assert.equal(
     await dismissNotice.evaluate((button) => getComputedStyle(button).backgroundColor),
-    'rgba(0, 0, 0, 0)',
+    noticeButtonFill,
   );
   await localNotice(main).getByRole('button', { name: '前往设置' }).press('Tab');
-  assert.deepEqual(
-    await dismissNotice.evaluate((button) => ({
-      focused: button.matches(':focus-visible'),
-      fill: getComputedStyle(button).backgroundColor,
-      outline: getComputedStyle(button).outlineStyle,
-    })),
-    { focused: true, fill: 'rgba(0, 0, 0, 0)', outline: 'solid' },
-  );
-  await dismissNotice.hover();
-  await main.waitForFunction(() => {
-    const button = document.querySelector('aside button:hover');
-    return button && getComputedStyle(button).backgroundColor !== 'rgba(0, 0, 0, 0)';
+  const settleNoticeButton = () => dismissNotice.evaluate(async button => {
+    await Promise.allSettled(button.getAnimations().filter(animation =>
+      animation.effect?.getTiming().iterations !== Infinity).map(animation => animation.finished));
   });
+  await settleNoticeButton();
+  const focusedNotice = await dismissNotice.evaluate(button => ({
+    focused: button.matches(':focus-visible'), fill: getComputedStyle(button).backgroundColor,
+  }));
+  assert.equal(focusedNotice.focused, true);
+  assert.notEqual(focusedNotice.fill, noticeButtonFill, 'Keyboard focus must have visible button feedback');
+  await dismissNotice.press('Shift+Tab');
+  await settleNoticeButton();
+  assert.equal(await dismissNotice.evaluate(button => getComputedStyle(button).backgroundColor), noticeButtonFill);
+  await dismissNotice.hover();
+  await settleNoticeButton();
+  await main.waitForFunction(fill => {
+    const button = document.querySelector('aside button:hover');
+    return button && getComputedStyle(button).backgroundColor !== fill;
+  }, noticeButtonFill);
   await dismissNotice.click();
   await localNotice(main).waitFor({ state: 'detached' });
   assert.equal(await main.getByRole('textbox', { name: '聊天消息' }).inputValue(), '');

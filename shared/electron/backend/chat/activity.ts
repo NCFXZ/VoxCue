@@ -1,5 +1,5 @@
 import type { ChatActivity } from '../../contracts/chat';
-// Expose public progress metadata, never reasoning text or tool arguments.
+// Expose only public search metadata, never reasoning text, signatures or arbitrary tool arguments.
 export function responseActivity(event: any): ChatActivity | undefined {
   if (['response.queued', 'response.created'].includes(event.type)) return { phase: 'waiting' };
   if (event.type === 'response.in_progress') return { phase: 'processing' };
@@ -44,19 +44,25 @@ export function responseActivity(event: any): ChatActivity | undefined {
         };
       if (action?.type === 'open_page' || action?.type === 'find_in_page') {
         try {
-          const url = new URL(action.url);
+          const url = new URL(action.url ?? item.page?.url);
           if (['https:', 'http:'].includes(url.protocol) && !url.username && !url.password)
             return {
               phase: 'reading',
               ...identity,
-              detail: `${url.hostname}${url.pathname}`.slice(0, 512),
+              detail: action.type === 'find_in_page' && typeof action.pattern === 'string' && action.pattern.trim()
+                ? action.pattern.slice(0, 512) : `${url.hostname}${url.pathname}`.slice(0, 512),
               ...(identity.id ? { url: `${url.origin}${url.pathname}`.slice(0, 2048) } : {}),
             };
         } catch {
           /* Invalid metadata must not break the response. */
         }
       }
-      return { phase: 'searching', ...identity };
+      return {
+        phase: action?.type === 'open_page' || action?.type === 'find_in_page' ? 'reading' : 'searching',
+        ...identity,
+        ...(action?.type === 'find_in_page' && typeof action.pattern === 'string' && action.pattern.trim()
+          ? { detail: action.pattern.slice(0, 512) } : {}),
+      };
     }
   }
   if (['response.output_text.delta', 'response.refusal.delta'].includes(event.type))

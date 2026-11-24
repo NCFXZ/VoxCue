@@ -98,10 +98,20 @@ export async function offlineElectronEntry(
     '};',
     "require('node:tls').connect = deny;",
     "require('node:module').syncBuiltinESMExports();",
-    "app.on('session-created', session => session.webRequest.onBeforeRequest(",
+    "app.on('session-created', session => {",
+    // Reject before Electron installs its fetch abort listener. Throwing later
+    // inside net.request can leave a listener referring to an uncreated request.
+    '  const fetch = session.fetch.bind(session);',
+    '  session.fetch = (input, ...args) => allowed(input) ? fetch(input, ...args) :',
+    "    Promise.reject(Error('Offline desktop regression forbids network access'));",
+    '  session.webRequest.onBeforeRequest(',
     "  { urls: ['http://*/*', 'https://*/*', 'ws://*/*', 'wss://*/*'] },",
     '  (details, callback) => callback({ cancel: !allowed(details.url) }),',
-    '));',
+    '  );',
+    '});',
+    "const failFixture = error => { console.error(error?.stack ?? String(error)); app.exit(1); };",
+    "process.on('uncaughtException', failFixture);",
+    "process.on('unhandledRejection', failFixture);",
     'app.setAppPath(' + JSON.stringify(workspace.platformRoot) + ');',
     ...(process.platform === 'darwin'
       ? [

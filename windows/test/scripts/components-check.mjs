@@ -99,7 +99,7 @@ export async function checkComponents(application) {
   await start.waitFor();
   assert.equal(await start.isDisabled(), true);
   assert.deepEqual(await application.evaluate(() => globalThis.componentRequests), []);
-  const notice = page.locator('.chat-column > .components-notice');
+  const notice = page.locator('.chat-settings-notices .components-notice[aria-label="本地组件提示"]');
   await notice
     .getByText('语音识别、知识库检索组件未下载，请在设置中下载或查看进度', { exact: true })
     .waitFor();
@@ -175,10 +175,11 @@ export async function checkComponents(application) {
     await personal.getByRole('button', { name: '面试知识库', exact: true }).isDisabled(),
     true,
   );
-  await personal.locator('.components-notice').getByRole('button', { name: '前往设置' }).click();
+  await knowledgeSection.locator('.profile-knowledge-help').getByRole('button', { name: '前往设置' }).click();
   await settings.getByRole('heading', { name: '本地组件', exact: true }).waitFor();
   const rag = settings.locator('.component-row[data-component-id="rag"]');
   const speech = settings.locator('.component-row[data-component-id="speech"]');
+  console.log('Native components: real RAG download cancellation');
   await assertInitialDownloadProgress(
     rag.locator('.download-button'),
     () => rag.getByRole('button', { name: '下载', exact: true }).click(),
@@ -204,6 +205,7 @@ export async function checkComponents(application) {
   await application.evaluate(() => {
     globalThis.ragMode = 'corrupt';
   });
+  console.log('Native components: real RAG archive checksum rejection');
   await rag.getByRole('button', { name: '下载', exact: true }).click();
   await waitForAsync(
     page,
@@ -227,6 +229,7 @@ export async function checkComponents(application) {
   await application.evaluate(() => {
     globalThis.ragMode = 'real';
   });
+  console.log('Native components: real RAG download and installation');
   await rag.getByRole('button', { name: '下载', exact: true }).click();
   await assertDownloadButton(page, rag.locator('.download-button'), { app: application });
   await waitForAsync(
@@ -252,6 +255,7 @@ export async function checkComponents(application) {
   await page.getByRole('button', { name: '个人信息', exact: true }).click();
   await personal.waitFor({ state: 'hidden' });
   await notice.getByRole('button', { name: '前往设置' }).click();
+  console.log('Native components: real speech download and installation');
   await speech.getByRole('button', { name: '下载', exact: true }).click();
   await waitForAsync(
     page,
@@ -263,6 +267,7 @@ export async function checkComponents(application) {
   assert.equal(await speech.getByText('已就绪', { exact: true }).count(), 0);
   await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
   assert.equal(await start.isEnabled(), true);
+  await notice.waitFor({ state: 'detached' });
   assert.equal(await notice.count(), 0);
   await page.getByRole('button', { name: '知识库', exact: true }).click();
   assert.equal(
