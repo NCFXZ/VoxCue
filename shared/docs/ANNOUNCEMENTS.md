@@ -1,6 +1,6 @@
 # 官网公告配置
 
-客户端固定匿名读取 `https://voxcue.com.cn/app/announcements.json`。发布方式为上传静态 JSON 文件；不需要新增网站编辑后台。仓库中的 `announcements.json` 是可直接上传的空配置，不会向用户展示示例公告。
+客户端固定匿名读取 `https://voxcue.com.cn/app/announcements.json`。同目录的 `announcements.json` 是待上传的官网配置。
 
 只有已集成本功能的客户端才能接收公告。此前发布且不含公告读取功能的客户端需要先升级一次。所有共享逻辑适用于 Windows 和 macOS，原生验证分别在对应平台执行。
 

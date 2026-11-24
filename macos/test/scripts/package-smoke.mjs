@@ -26,8 +26,10 @@ import { requireGuestIsolation } from './guest-isolation.mjs';
 import { launchGuestAsar } from './guest-asar-host.mjs';
 import { productionFuses } from '../../scripts/production-runtime.mjs';
 if (!process.argv.includes('--static-only')) await requireGuestIsolation();
-const upgradeVersions = upgradeBaselinesFor(process.argv.slice(2));
-if (process.argv.slice(2).some(arg => !arg.startsWith('--from=') &&
+const args = process.argv.slice(2);
+const upgradeVersions = upgradeBaselinesFor(args);
+if ((args.includes('--static-only') && args.some(arg => arg.startsWith('--from='))) ||
+    args.some(arg => !arg.startsWith('--from=') &&
     !['--static-only', '--install-archive', '--upgrades-only'].includes(arg)))
   throw Error('Use --static-only on the owner or run installation and upgrades through the disposable guest runner.');
 const require = createRequire(import.meta.url);
@@ -56,6 +58,16 @@ assert.equal(
   'arm64',
 );
 const resources = path.join(bundle, 'Contents/Resources');
+const audioInput = 'com.apple.security.device.audio-input';
+for (const target of [bundle, path.join(resources, 'native/VoxCue.Audio')]) {
+  const entitlements = run('/usr/bin/codesign', ['-d', '--entitlements', '-', target])
+    .replace(/\s+/g, '');
+  assert.ok(
+    entitlements.includes(`<key>${audioInput}</key><true/>`) ||
+      entitlements.includes(`[Key]${audioInput}[Value][Bool]true`),
+    `The signed bundle must permit audio input for ${target}`,
+  );
+}
 assert.equal(run('/usr/bin/lipo', ['-archs', path.join(resources, 'native/VoxCue.AudioClock.node')]).trim(), 'arm64');
 const { sileroModel, sileroLicense, validSileroAsset } = await import('../../../shared/scripts/silero-assets.mjs');
 for (const [directory, asset] of [['native', sileroModel], ['licenses', sileroLicense]]) {

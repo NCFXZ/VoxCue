@@ -51,15 +51,15 @@ guest 还需在 `/opt/homebrew/bin/node` 准备与当前测试环境一致的 No
 node test/scripts/package-guest-smoke.mjs
 ```
 
-完整入口从 `macos/release/<版本>/` 读取正式 1.1.1、1.2.2、1.2.3 和 1.3.1 arm64 ZIP，按 `package-upgrade-baselines.mjs` 固定的摘要认证后复制到客机。1.1.1 使用旧 v1 助手，其余使用 v11。GitHub 上已撤下 1.3.1，请使用保存的正式归档。1.3.1 是 1.3.2 的直接前序版本，用于验证兼容索引、引用版本和原账号分区的保留。
+完整入口从 `macos/release/<版本>/` 读取正式 1.1.1、1.2.2、1.2.3、1.3.1 和 1.3.2 arm64 ZIP，按 `package-upgrade-baselines.mjs` 固定的摘要认证后复制到客机。也可通过 `VOXCUE_TEST_UPGRADE_ARCHIVES` 指定包含版本子目录的绝对路径。1.1.1 使用旧 v1 助手，其余使用 v11。GitHub 上已撤下 1.3.1，请使用保存的正式归档。
 
-单独复测安装与覆盖升级时可传 `--install-only`。它执行正式安装包检查和四个归档版本的升级用例，并使用包内 Qwen 程序对合成音频做 CPU 转写。客机报告支持 Metal 时也执行 Metal 转写；缺少该能力时终端单列待验。镜像、来宾保护和临时资料校验与完整入口相同。
+单独复测安装与覆盖升级时可传 `--install-only`。它执行正式安装包检查和所选归档版本的升级用例，并使用包内 Qwen 程序对合成音频做 CPU 转写。客机报告支持 Metal 时也执行 Metal 转写；缺少该能力时终端单列待验。镜像、来宾保护和临时资料校验与完整入口相同。
 
 单独复测包内运行时时可传 `--runtime-only`。它在干净客机中用系统复制工具将只读 DMG 内的应用安装到 `/Applications/VoxCue.app`，通过 LaunchServices 两次启动并正常退出，随后检查 Copilot/Codex 的离线握手、合成截图的编码与 Worker 回收、已校验组件的就绪状态及推理。复制时保留原有的隔离标记。
 
 需要在同一个干净客机串行复测以上两组时，同时传 `--install-only --runtime-only`。每组使用独立产品资料，结束时汇总失败项。
 
-仅复测升级可传 `--upgrades-only`。先检查最终安装包及历史 ZIP 的签名或摘要，再从最新的旧版开始验证。重跑某一个旧版时可附加 `--from=1.3.1`，版本必须在固定摘要清单中。
+仅复测升级可传 `--upgrades-only`。先检查最终安装包及历史 ZIP 的签名或摘要，再从最新的旧版开始验证。运行安装或升级验收时可以通过一个或多个 `--from=<版本>` 选择旧包，版本必须在固定摘要清单中。本次现行前序版本验收使用 `--from=1.3.2`。
 
 runner 仅分享白名单公开代码、依赖、模型和发行资产的只读临时输入；宿主 home、真实 Keychain、私有签名材料、账号、剪贴板、音频和 USB 均不共享。源依赖的编号副本只有在规范同名项存在时才跳过；代码通过普通归档在 guest 本地恢复，避免 virtiofs framework 链接问题。
 
@@ -78,6 +78,8 @@ GUI／原生／推理串行执行，并持续核对当前 UID 已登录且解锁
 1.1.1 的归档认证／准备／取消使用未修改的真实旧宿主和最终 native updater，其 NSBundle 身份与版本来自旧包；不以 JS 版本覆盖或重签旧包替代。独立合成 Sparkle 入口负责坏签名、取消、commit／relaunch 和缓存恢复，数据归档覆盖不能称为 Sparkle 安装。最终系统凭据授权另按 [v11 复验条件](../../shared/docs/MACOS_1.2.2_CREDENTIAL_HANDOFF.md#最终签名包与-guest-复验条件)执行。
 
 `--screenshot-only` 是最终 ASAR 合成截图专项：连续编码、错误、取消、期限、Worker 退休和内存收敛；故障注入仅作用于测试宿主，产品不变。音频设备专项只可在独立 guest 使用固定虚拟设备及自有 aggregate，不采样宿主或物理硬件。参数成功或全零 PCM 不能证明音频权限已授权；AudioOnly 和 Screen＋Audio 状态通过正常 guest 系统 UI 建立，不改 TCC 数据库。
+
+首次麦克风权限用独立新 guest 的已验证虚拟输入和未修改的签名应用复验。进入本地账户，在面试设置点击「检查麦克风」，核对系统弹窗的应用名称。选择拒绝后，从应用打开麦克风隐私设置，核对 VoxCue 出现在列表且开关关闭。打开开关，按系统提示退出并重新打开应用，再检查「麦克风可用」。
 
 owner 只可运行 `package-smoke.mjs --static-only` 的零产品启动检查，读取 ZIP／DMG、签名、fuses、ASAR 和原生元数据；退出 2 表示动态覆盖未执行。产品 `--online`、AEC `--packaged` 和 `package-temporary-smoke.mjs` 已退役。发布后的匿名资产／清单回读不启动产品。
 

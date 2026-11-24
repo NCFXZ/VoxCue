@@ -3,6 +3,7 @@ import { buildMacApp } from './package-app.mjs';
 import { updateSigningKey } from './update-signing.mjs';
 import { sparkleTools } from './sparkle-tools.mjs';
 import { createMacDmg } from './dmg.mjs';
+import { createMacDelta } from './create-mac-delta.mjs';
 import { localSigningCertificate, verifyLocalApp } from './development-signing.mjs';
 import { mkdtemp, mkdir, rm, readFile, writeFile, stat, lstat, realpath } from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
@@ -18,7 +19,7 @@ const run = (command, args) => {
   return result.stdout;
 };
 const version = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8')).version;
-export async function packageInstaller(output = path.join(root, 'release', version)) {
+export async function packageInstaller(output = path.join(root, 'release', version), deltaFrom) {
   if (await lstat(output).catch(() => false))
     throw Error('Release output already exists; do not overwrite an existing release');
   const { key, publicKey, privateKeyFile } = await updateSigningKey();
@@ -71,16 +72,20 @@ export async function packageInstaller(output = path.join(root, 'release', versi
       ]),
     );
     file.voxcueSignature = sign(null, payload, key).toString('base64');
+    if (deltaFrom) file.delta = await createMacDelta(deltaFrom, zip, { ...file, version }, key, publicKey);
     await writeFile(
       path.join(output, 'latest-mac.yml'),
       JSON.stringify({ version, minimumSystemVersion, files: [file] }, null, 2) + '\n',
     );
     await createMacDmg(app, path.join(output, `VoxCue-${version}-arm64.dmg`), stage, version);
     completed = true;
-    console.log(`Created signed-update ZIP, DMG and latest-mac.yml in ${output}`);
+    console.log(`Created signed-update ZIP, DMG, latest-mac.yml${file.delta ? ' and differential plan' : ''} in ${output}`);
   } finally {
     await cleanup();
   }
 }
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url))
-  await packageInstaller();
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const option = process.argv.find(arg => arg.startsWith('--delta-from='));
+  if (option === '--delta-from=') throw Error('Specify the previous signed Mac release directory');
+  await packageInstaller(undefined, option?.slice('--delta-from='.length));
+}

@@ -55,10 +55,11 @@ export function useFollowScroll(
   const followBottom = (node: HTMLDivElement, position: ScrollPosition) => {
     if (frame.current !== null) return;
     const bottom = node.scrollHeight - node.clientHeight;
-    if (bottom === node.scrollTop) return;
     const reduced = matchMedia('(prefers-reduced-motion: reduce)');
     if (reduced.matches || Math.abs(bottom - node.scrollTop) <= 1) {
-      writeTop(node, position, bottom);
+      // Scroll dimensions are rounded. Let the browser clamp to the true bottom
+      // so a resize callback keeps the same position as conversation restoration.
+      writeTop(node, position, node.scrollHeight);
       return;
     }
     let top = node.scrollTop;
@@ -69,7 +70,7 @@ export function useFollowScroll(
       if (ref.current !== node || current.current !== position || !position.following || !node.clientHeight) return;
       const target = node.scrollHeight - node.clientHeight;
       if (reduced.matches || Math.abs(node.scrollTop - target) <= 1) {
-        writeTop(node, position, target);
+        writeTop(node, position, node.scrollHeight);
         return;
       }
       // Keep the same motion as each new line changes the destination.
@@ -81,7 +82,7 @@ export function useFollowScroll(
       const decay = Math.exp(-elapsed / responseMs);
       const next = target + (delta + drift) * decay;
       if (Math.abs(next - target) <= 0.5 || (next - target) * delta <= 0) {
-        writeTop(node, position, target);
+        writeTop(node, position, node.scrollHeight);
         return;
       }
       velocity = (velocity - drift / responseMs) * decay;

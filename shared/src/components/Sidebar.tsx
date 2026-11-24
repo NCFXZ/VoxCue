@@ -12,9 +12,9 @@ import {
   PanelLeftOpen,
   Refresh,
   X,
+  LogIn,
+  LogOut,
 } from './icons';
-import { LogOut } from './LogoutIcon';
-import { LogIn } from './LoginIcon';
 import { Button } from './ui/button';
 import { ConfirmDeleteButton } from './ui/confirm-delete-button';
 import { AppLogo } from './AppLogo';

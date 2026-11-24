@@ -198,6 +198,7 @@ export async function returnToUiLogin(app, main, action) {
   return waitForAccountWindow(app, '/index.html#login', 'heading', '登录 VoxCue');
 }
 export async function enterPrimaryUiAccount(app, login) {
+  await login.waitForLoadState('domcontentloaded');
   await app.evaluate(
     ({ app }, fixture) => {
       if (!globalThis.primaryAccountFixture) {

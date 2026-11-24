@@ -54,7 +54,7 @@ export function validatePlatformUpdate(value: unknown, target: ReleaseTarget): P
           { ...candidate.binary, state: 'uploaded' },
           ...(target === 'windows-x64'
             ? [{ name: candidate.binary.name + '.blockmap', size: 1, state: 'uploaded' }]
-            : []),
+            : candidate.delta ? [{ ...candidate.delta, state: 'uploaded' }] : []),
         ],
       },
     ],

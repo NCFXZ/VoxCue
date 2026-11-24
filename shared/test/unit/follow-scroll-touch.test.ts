@@ -11,10 +11,13 @@ import { useFollowScroll } from '../../src/components/useFollowScroll';
 class ScrollNode {
   clientHeight = 300;
   scrollHeight = 900;
+  fractionalBottom = 0;
   lastElementChild = {} as Element;
   private top = 0;
   get scrollTop() { return this.top; }
-  set scrollTop(value: number) { this.top = Math.max(0, Math.min(value, this.scrollHeight - this.clientHeight)); }
+  set scrollTop(value: number) {
+    this.top = Math.max(0, Math.min(value, this.scrollHeight - this.clientHeight + this.fractionalBottom));
+  }
   focus = vi.fn();
 }
 const frames = new Map<number, FrameRequestCallback>();
@@ -240,6 +243,19 @@ it('follows a late Markdown layout and viewport resize without another stream up
   notify();
   settle();
   expect(node.scrollTop).toBe(780);
+});
+
+it('keeps the true fractional bottom during restoration and after new content settles', () => {
+  const { scroll, node, settle } = setup(true);
+  node.fractionalBottom = 0.8;
+  scroll.restorePosition();
+  expect(node.scrollTop).toBe(600.8);
+  scroll.syncLayout();
+  expect(node.scrollTop).toBe(600.8);
+  node.scrollHeight += 40;
+  scroll.syncLayout();
+  settle();
+  expect(node.scrollTop).toBe(640.8);
 });
 
 it('honors reduced motion and continues to follow the newest content', () => {

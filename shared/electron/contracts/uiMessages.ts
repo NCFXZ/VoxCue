@@ -791,6 +791,8 @@ export const uiMessages: Readonly<Record<string, string>> = {
   '默认系统音频设备不可用，请在面试设置中重新选择。':
     'The default output device is unavailable. Choose another in Interview settings.',
   麦克风可用: 'Microphone available',
+  麦克风权限: 'Microphone permission',
+  检查麦克风: 'Check microphone',
   系统音频可用: 'System audio available',
   '麦克风访问被拒绝，请检查 Windows 隐私设置和设备权限。':
     'Microphone access was denied. Check Windows privacy settings and device permissions.',

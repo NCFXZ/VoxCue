@@ -11,9 +11,9 @@ export function waveform(heights: number[], offset: number) {
 }
 export const idlePath = waveform(idleBars, 0);
 
-export function RecordingWaveIcon({ pathRef, size = 20 }: { pathRef?: Ref<SVGPathElement>; size?: number }) {
+export function RecordingWaveIcon({ pathRef }: { pathRef?: Ref<SVGPathElement> }) {
   return (
-    <svg className="recording-wave" width={size} height={size * 0.9} viewBox="0 0 24 20" aria-hidden="true">
+    <svg className="recording-wave" width={18} height={18} viewBox="0 0 24 20" aria-hidden="true">
       <path ref={pathRef} d={idlePath} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
     </svg>
   );

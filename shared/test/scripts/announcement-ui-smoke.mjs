@@ -7,6 +7,7 @@ import { testRoot, electron } from './test-workspace.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
 import { installUiAccount, enterPrimaryUiAccount, waitForRestoredMainWindow, focusUiWindow, closeUiApp } from './install-ui-account.mjs';
 import { captureRequested } from './capture-requested.mjs';
+import { assertSystemSymbol } from './assert-system-symbol.mjs';
 import { assertNoticeStackMotion, assertNoticeQueueTransition } from './assert-notice-stack-motion.mjs';
 
 const feedFile = path.join(testRoot, 'announcement-feed.json');
@@ -100,7 +101,11 @@ try {
 
   await page.evaluate(() => localStorage.setItem('voxcue-update-notice-v1', JSON.stringify({ version: '0.0.1', pending: false })));
   await page.reload();
-  await page.getByRole('complementary', { name: '更新完成', exact: true }).waitFor();
+  const completed = page.getByRole('complementary', { name: '更新完成', exact: true });
+  await completed.waitFor();
+  if (process.platform === 'darwin')
+    await assertSystemSymbol(completed.getByRole('link', { name: '查看更新日志', exact: true }), 'BulletList', 'list.bullet', 16);
+  await captureRequested(completed, 'update-completed');
   assert.equal(await banner().count(), 0, 'Update completion takes priority over announcements');
   await assertNoticeQueueTransition(page, '关闭提示');
   await banner().getByText('公告预览', { exact: true }).waitFor();

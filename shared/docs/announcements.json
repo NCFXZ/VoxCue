@@ -1,4 +1,30 @@
 {
   "schemaVersion": 1,
-  "announcements": []
+  "announcements": [
+    {
+      "id": "welcome-voxcue",
+      "title": {
+        "zh-CN": "欢迎使用 VoxCue",
+        "en": "Welcome to VoxCue"
+      },
+      "subtitle": {
+        "zh-CN": "跟着教程完成基础设置，了解如何用 VoxCue 准备面试。",
+        "en": "Follow the guide to set up VoxCue and get ready for your interview."
+      },
+      "expiresAt": "2099-01-01T00:00:00Z",
+      "audience": "all",
+      "versionFilter": { "type": "all" },
+      "button": {
+        "label": { "zh-CN": "查看使用教程", "en": "Read the guide" },
+        "icon": "external-link",
+        "action": {
+          "type": "url",
+          "url": {
+            "zh-CN": "https://voxcue.com.cn/install/?lang=zh-CN",
+            "en": "https://voxcue.com.cn/en/install/?lang=en"
+          }
+        }
+      }
+    }
+  ]
 }

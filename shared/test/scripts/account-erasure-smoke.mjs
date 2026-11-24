@@ -229,6 +229,10 @@ try {
       layoutUnit(order.remove) >= layoutUnit(order.exportBottom),
     'Migration and export follow cloud backup and precede deletion: ' + JSON.stringify(order),
   );
+  // Let the scroll body's ResizeObserver publish its gutter before sampling the edges.
+  await settings.locator('.settings-content-body').evaluate(() =>
+    new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+  );
   const syncAlignment = await settings.locator('.cloud-sync-actions').evaluate((node) => {
     const box = node.getBoundingClientRect();
     const buttons = [...node.querySelectorAll(':scope > button')].map((button) =>
@@ -492,10 +496,17 @@ try {
   await password.fill('wrong');
   await uiClick(modal.getByRole('checkbox'));
   await uiClick(confirm);
-  await modal.getByRole('alert').waitFor();
+  await modal.getByRole('alert').filter({ hasText: '邮箱或密码不正确。' }).waitFor();
   assert.ok(store.user(user.email));
-  const state = await main.evaluate(() => window.desktop.cloudAccount({ action: 'status' }));
-  assert.equal(state.ok, true);
+  const status = await main.waitForFunction(async () => {
+    const result = await window.desktop.cloudAccount({ action: 'status' });
+    if (!result.ok && result.retryAfterSeconds === 1 &&
+        result.error === '账号操作正在进行，请稍后重试。') return false;
+    return result;
+  }, undefined, { polling: 100 });
+  const state = await status.jsonValue();
+  await status.dispose();
+  assert.equal(state.ok, true, state.error);
   assert.equal(state.state.user.id, user.id);
   await fs.mkdir(path.join(profile, 'component-cache'), { recursive: true });
   await fs.writeFile(path.join(profile, 'component-cache', 'public-synthetic-model'), 'keep');

@@ -1,5 +1,5 @@
 import { openModelMenu } from './install-ui-account.mjs';
-import { connectUiAccount } from './install-ui-account.mjs';
+import { connectUiAccount, enterPrimaryUiAccount, focusUiWindow } from './install-ui-account.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 
 import { mkdir, mkdtemp } from 'node:fs/promises';
@@ -52,7 +52,9 @@ try {
     };
   });
   const login = await app.firstWindow();
-  const page = await connectUiAccount(app, login);
+  const main = process.platform === 'darwin' ? await enterPrimaryUiAccount(app, login) : login;
+  if (main !== login) await focusUiWindow(app, main);
+  const page = await connectUiAccount(app, main);
   page.setDefaultTimeout(15000);
   page.on('pageerror', (error) => errors.push(error.message));
   const input = page.getByRole('textbox', { name: '聊天消息', exact: true });

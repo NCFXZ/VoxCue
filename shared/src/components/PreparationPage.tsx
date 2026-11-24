@@ -27,6 +27,7 @@ import {
   Square,
   X,
   Person,
+  personalInfoIconSize,
   Play,
   Settings,
   Refresh,
@@ -547,7 +548,7 @@ export function PreparationPage({
             aria-controls="personal-info-panel"
             onClick={() => (infoOpen ? closeInfo() : openInfo())}
           >
-            <Person size={15} />
+            <Person size={personalInfoIconSize} />
             {t('个人信息')}
           </Button>
           <Button

@@ -11,10 +11,12 @@ import workspace from './workspace.mjs';
 const require = workspace.platformRequire;
 const compiled = path.join(workspace.platformRoot, 'dist-electron/shared/electron/backend');
 const { packagesFor } = require(path.join(compiled, 'components/catalog.js'));
-const { releaseCandidates, compareVersions } = require(path.join(compiled, 'updates/releases.js'));
+const { releaseCandidates, compareVersions, manifestFile, macDeltaFile } = require(path.join(compiled, 'updates/releases.js'));
 const { downloadUrl, readPublicText } = require(path.join(compiled, 'downloads.js'));
 const yaml = createRequire(require.resolve('electron-updater/package.json'))('js-yaml');
 const components = process.argv.includes('--components');
+const platforms = ['windows-x64', 'macos-arm64'];
+const platform = process.argv.find((arg) => arg.startsWith('--platform='))?.slice(11);
 const tag = components
   ? 'models-v1.0.0'
   : process.argv.find((arg) => arg.startsWith('--tag='))?.slice(6);
@@ -22,6 +24,8 @@ assert.ok(
   tag && /^[A-Za-z0-9][A-Za-z0-9._+-]{0,199}$/.test(tag),
   'Use --components or --tag=v<stable version>',
 );
+assert.ok(platform === undefined || (!components && platforms.includes(platform)),
+  'Release assets can be limited with --platform=windows-x64 or --platform=macos-arm64');
 const assets = new Map();
 if (components) {
   for (const [platform, arch] of [
@@ -47,7 +51,7 @@ if (components) {
       8 * 1024 * 1024,
     ),
   );
-  for (const target of ['windows-x64', 'macos-arm64']) {
+  for (const target of platform ? [platform] : platforms) {
     for (const candidate of releaseCandidates([release], target)) {
       assert.ok(
         compareVersions(candidate.version, '1.3.3') >= 0,
@@ -60,7 +64,6 @@ if (components) {
         128 * 1024,
       );
       const info = yaml.load(raw);
-      const { manifestFile } = require(path.join(compiled, 'updates/releases.js'));
       const file = manifestFile(info, candidate);
       assets.set(candidate.manifest, {
         name: candidate.manifest,
@@ -73,6 +76,13 @@ if (components) {
         bytes: file.size,
         algorithm: 'sha512',
         digest: Buffer.from(file.sha512, 'base64').toString('hex'),
+      });
+      const delta = macDeltaFile(info, candidate);
+      if (delta) assets.set(delta.url, {
+        name: delta.url,
+        bytes: delta.size,
+        algorithm: 'sha512',
+        digest: Buffer.from(delta.sha512, 'base64').toString('hex'),
       });
       for (const asset of release.assets.filter((asset) =>
         target === 'windows-x64'

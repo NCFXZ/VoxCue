@@ -21,6 +21,12 @@ const app = await electron.launch({ args: ['.'], env });
 const checks = [],
   errors = [];
 let glyphExtents;
+const verifyRecordingWave = async (svg) => {
+  assert.deepEqual(await svg.evaluate((element) => {
+    const { width, height } = element.getBoundingClientRect();
+    return { width, height, paths: element.querySelectorAll('path').length };
+  }), { width: 18, height: 18, paths: 1 });
+};
 const verifyIcons = async (page, minimum, liveInterview = false) => {
   await page.waitForFunction(() =>
     document
@@ -32,13 +38,9 @@ const verifyIcons = async (page, minimum, liveInterview = false) => {
       ),
   );
   if (liveInterview) {
-    const recording = page.locator('.floating-toolbar button.floating-record > svg.recording-wave');
-    assert.equal(await recording.count(), 1);
-    assert.equal(await recording.locator('path').count(), 1);
+    await verifyRecordingWave(page.locator('.floating-toolbar button.floating-record > svg.recording-wave'));
   }
-  const icons = await page.locator(liveInterview
-    ? 'svg:not(.floating-toolbar button.floating-record > svg.recording-wave)'
-    : 'svg').evaluateAll((elements) =>
+  const icons = await page.locator('svg:not(.recording-wave)').evaluateAll((elements) =>
     elements.map((element) => ({
       name: element.getAttribute('data-sf-symbol'),
       mask: !!element.querySelector('mask image'),
@@ -55,7 +57,7 @@ const verifyIcons = async (page, minimum, liveInterview = false) => {
     JSON.stringify(icons),
   );
   // The profile editor stays mounted inside a hidden panel; only visible SVGs
-  // have nonzero bounds, while every mounted icon still needs a system symbol.
+  // have nonzero bounds. Mounted icons still use a validated native mask.
   assert.ok(icons.filter((item) => item.width > 0).length >= minimum, JSON.stringify(icons));
   assert.deepEqual(
     icons.filter(
@@ -97,7 +99,7 @@ try {
   const login = await app.firstWindow();
   await login.getByRole('heading', { name: '登录 VoxCue', exact: true }).waitFor();
   await verifyIcons(login, 4);
-  assert.equal(await login.locator('.login-interview-preview .floating-toolbar [data-sf-symbol="waveform"]').count(), 1);
+  await verifyRecordingWave(login.locator('.login-interview-preview .floating-toolbar svg.recording-wave'));
   await login.screenshot({ animations: 'disabled' });
   const assets = await app.evaluate(({ nativeImage, app }, symbols) => {
     if (!app.getPath('userData').includes('/test/results/icons-native-'))
@@ -165,7 +167,7 @@ try {
   // Native side bearings can differ by a fraction of a point after scaling.
   assert.ok(Math.abs(smallFont.bottom - largeFont.bottom) <= 8);
   checks.push(
-    `${assets.length} 个实际 AppKit SF Symbols 均非空、具有透明背景；登录图标使用本平台实现`,
+    `${assets.length} 个实际 AppKit SF Symbols 均非空、具有透明背景`,
     '字号图标原生笔画加粗、基线对齐，大 A 的实际像素高度至少为小 A 的 1.45 倍',
   );
   await installUiAccount(app, { speech: true, components: true });
@@ -203,7 +205,8 @@ try {
   await surface.getByRole('textbox', { name: '聊天消息', exact: true }).waitFor();
   await surface.waitForFunction(() => !document.querySelector('[aria-label="聊天消息"]').disabled);
   await verifyIcons(page, 10);
-  await assertSystemSymbol(page.getByRole('button', { name: '个人信息', exact: true }), 'Person', 'person.crop.circle', 15);
+  await assertSystemSymbol(page.getByRole('button', { name: '新对话', exact: true }), 'CommentEdit', 'square.and.pencil', 18);
+  await assertSystemSymbol(page.getByRole('button', { name: '个人信息', exact: true }), 'Person', 'person.crop.circle', 16);
   await page.screenshot({ animations: 'disabled' });
   await captureRequested(page, 'mac-sf-main');
   await page.getByRole('button', { name: '用户菜单', exact: true }).click();
@@ -212,12 +215,16 @@ try {
   await settings.waitFor();
   await verifyIcons(page, 20);
   await settings.screenshot({ animations: 'disabled' });
+  await settings.getByRole('button', { name: 'AI 服务', exact: true }).click();
+  await assertSystemSymbol(settings.getByRole('button', { name: '登录', exact: true }), 'LogIn', symbols.LogIn, 16);
+  await assertSystemSymbol(settings.getByRole('button', { name: '退出登录', exact: true }), 'LogOut', symbols.LogOut, 16);
+  await captureRequested(settings.locator('.ai-services-panel'), 'mac-sf-account-actions');
+  checks.push('AI 服务的登录和退出登录均使用标准 AppKit SF Symbols，图标尺寸为 16 px');
   await page.emulateMedia({ colorScheme: 'dark' });
   await page.waitForFunction(() => document.documentElement.classList.contains('dark'));
   const dark = await verifyIcons(page, 20);
-  assert.ok(dark.some((item) => item.color !== 'rgb(0, 0, 0)'));
+  assert.ok(dark.some((item) => item.name && item.color !== 'rgb(0, 0, 0)'));
   await settings.screenshot({ animations: 'disabled' });
-  await settings.getByRole('button', { name: 'AI 服务', exact: true }).click();
   const officialUsage = settings.getByRole('link', { name: '查看官方用量', exact: true });
   assert.equal(await officialUsage.getAttribute('href'), 'https://chatgpt.com/settings/usage');
   assert.equal(await officialUsage.locator('svg').count(), 0);
@@ -235,7 +242,7 @@ try {
   checks.push('重置、刷新和软件更新分别使用不同的图形，更新设置入口与操作按钮一致');
   await settings.getByRole('button', { name: '面试设置', exact: true }).click();
   await settings.getByRole('slider', { name: '面试字体大小', exact: true }).waitFor();
-  assert.equal(await settings.locator('.interview-preview-shell .floating-toolbar [data-sf-symbol="waveform"]').count(), 1);
+  await verifyRecordingWave(settings.locator('.interview-preview-tools svg.recording-wave'));
   assert.equal(
     await settings.getByRole('slider', { name: '面试背景透明度', exact: true }).count(),
     1,

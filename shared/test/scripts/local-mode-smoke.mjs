@@ -167,7 +167,8 @@ try {
     await main.evaluate(() => window.dispatchEvent(new Event('voxcue-cloud-expired')));
     await configurationError.waitFor({ state: 'detached' });
     await assertSystemSymbol(settings.getByRole('navigation', { name: '设置分类' }).getByRole('button', { name: 'VoxCue 账号', exact: true }), 'Person', 'person.crop.circle', 18);
-    await assertSystemSymbol(settings.getByRole('button', { name: '登录', exact: true }), 'Person', 'person.crop.circle', 16);
+    const symbols = JSON.parse(await readFile(path.join(workspace.platformRoot, 'public/sf-symbols/resolved.json'), 'utf8'));
+    await assertSystemSymbol(accountPanel.getByRole('button', { name: '登录', exact: true }), 'LogIn', symbols.LogIn, 16);
   }
   assert.equal(await settings.getByRole('switch').count(), 0);
   assert.equal(await settings.getByRole('button', { name: '删除账号', exact: true }).count(), 0);

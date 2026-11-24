@@ -51,7 +51,7 @@ window.cloudFormTest.mount();`,
             : undefined,
         );
         bundler.onLoad({ filter: /.*/, namespace: 'fixture' }, () => ({
-          contents: 'export function LogOut(){return null} export const Person=LogOut;',
+          contents: 'export function LogIn(){return null} export const LogOut=LogIn;',
           loader: 'js',
         }));
       },

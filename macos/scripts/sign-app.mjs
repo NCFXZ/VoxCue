@@ -44,20 +44,6 @@ export async function signMacApp(
   targets.sort((a, b) => b.split(path.sep).length - a.split(path.sep).length);
   const temporary = await mkdtemp(path.join(os.tmpdir(), 'voxcue-sign-policy-'));
   const policies = new Map();
-  for (const [name, keys] of [
-    ['jit', ['allow-jit']],
-    ['libraries', ['disable-library-validation']],
-    ['jit-libraries', ['allow-jit', 'disable-library-validation']],
-  ]) {
-    const file = path.join(temporary, name + '.plist');
-    await writeFile(
-      file,
-      '<?xml version="1.0"?><plist version="1.0"><dict>' +
-        keys.map((key) => '<key>com.apple.security.cs.' + key + '</key><true/>').join('') +
-        '</dict></plist>',
-    );
-    policies.set(name, file);
-  }
   try {
     for (const file of [...targets, app]) {
       if (file === path.join(app, 'Contents/Resources/native/VoxCue')) {
@@ -66,15 +52,14 @@ export async function signMacApp(
         continue;
       }
       const relative = path.relative(app, file).replaceAll(path.sep, '/');
+      const mainExecutable = file === app || relative === 'Contents/MacOS/VoxCue';
       const electronHost =
-        file === app ||
-        relative === 'Contents/MacOS/VoxCue' ||
+        mainExecutable ||
         /^Contents\/Frameworks\/VoxCue Helper(?: \((?:Renderer|GPU|Plugin)\))?\.app(?:\/Contents\/MacOS\/VoxCue Helper(?: \((?:Renderer|GPU|Plugin)\))?)?$/.test(
           relative,
         );
       const v8 =
-        file === app ||
-        relative === 'Contents/MacOS/VoxCue' ||
+        mainExecutable ||
         /^Contents\/Frameworks\/VoxCue Helper(?: \(Renderer\))?\.app(?:\/Contents\/MacOS\/VoxCue Helper(?: \(Renderer\))?)?$/.test(
           relative,
         ) ||
@@ -89,16 +74,29 @@ export async function signMacApp(
         relative.endsWith('/copilot-runtime') ||
         relative === 'Contents/Resources/native/qwen/voxcue-qwen' ||
         relative === 'Contents/Resources/native/qwen/python/bin/python3.12';
+      const audioInput = mainExecutable || relative === 'Contents/Resources/native/VoxCue.Audio';
+      const keys = preserveMetadata
+        ? []
+        : [
+            v8 && 'com.apple.security.cs.allow-jit',
+            libraries && 'com.apple.security.cs.disable-library-validation',
+            audioInput && 'com.apple.security.device.audio-input',
+          ].filter(Boolean);
+      const policy = keys.join(',');
+      if (policy && !policies.has(policy)) {
+        const plist = path.join(temporary, `entitlements-${policies.size}.plist`);
+        await writeFile(
+          plist,
+          '<?xml version="1.0"?><plist version="1.0"><dict>' +
+            keys.map((key) => '<key>' + key + '</key><true/>').join('') +
+            '</dict></plist>',
+        );
+        policies.set(policy, plist);
+      }
       signLocalCode(file, signing, file === app ? identifier : undefined, {
         preserveMetadata,
         runtime: !preserveMetadata,
-        ...(!preserveMetadata && (v8 || libraries)
-          ? {
-              entitlements: policies.get(
-                v8 && libraries ? 'jit-libraries' : v8 ? 'jit' : 'libraries',
-              ),
-            }
-          : {}),
+        entitlements: policies.get(policy),
       });
     }
     verifyLocalApp(app, signing, identifier);

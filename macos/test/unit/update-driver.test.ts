@@ -7,6 +7,7 @@ import * as archiveDownload from '../../electron/updates/download';
 import { MacArchiveOwnership } from '../../electron/updates/archives';
 import { testRoot } from '../../../shared/test/scripts/test-workspace.mjs';
 import { macUpdatePayload } from '../../electron/updates/manifest';
+import { regionLookup } from '../../../shared/electron/backend/downloads';
 import { updateInterval } from '../../../shared/electron/backend/updates/cache';
 import { UpdateService } from '../../../shared/electron/backend/updates/service';
 const mocks = vi.hoisted(() => ({ fetch: vi.fn(), quit: vi.fn(), version: '0.2.1' }));
@@ -54,6 +55,7 @@ function setup(bytes = Buffer.from('archive fixture')) {
   const archive = path.join(cache, 'archives', update.url);
   const stateFile = path.join(cache, 'release-cache.json');
   const fetcher = async (url: string) => {
+    if (url === regionLookup) return new Response('loc=GB\n');
     if (url.startsWith('https://api.github.com/repos/NCFXZ/VoxCue/releases?'))
       return new Response(
         JSON.stringify([
@@ -216,18 +218,19 @@ it('persists hourly checks and original success time across restart and clock ro
   let now = 1_800_000_000_000;
   vi.spyOn(Date, 'now').mockImplementation(() => now);
   await Promise.all([f.driver.checkForUpdates(), f.driver.checkForUpdates()]);
-  expect(mocks.fetch).toHaveBeenCalledTimes(2);
+  expect(mocks.fetch).toHaveBeenCalledTimes(3);
+  expect(mocks.fetch).toHaveBeenNthCalledWith(1, regionLookup, expect.objectContaining({ credentials: 'omit' }));
   await f.driver.dispose();
   now -= 1000;
   const restart = f.create();
   await restart.driver.checkForUpdates();
-  expect(mocks.fetch).toHaveBeenCalledTimes(2);
+  expect(mocks.fetch).toHaveBeenCalledTimes(3);
   expect(restart.driver.lastCheckedAt()).toBe(1_800_000_000_000);
   await restart.driver.checkForUpdates(true);
-  expect(mocks.fetch).toHaveBeenCalledTimes(4);
+  expect(mocks.fetch).toHaveBeenCalledTimes(6);
   now += updateInterval;
   await restart.driver.checkForUpdates();
-  expect(mocks.fetch).toHaveBeenCalledTimes(6);
+  expect(mocks.fetch).toHaveBeenCalledTimes(9);
 });
 it('preserves the complete authenticated offer through cache reload and download', async () => {
   const f = setup();
@@ -279,7 +282,11 @@ it('restores a complete newer archive after the TTL with auto-download disabled 
   expect(restart.native.begin).not.toHaveBeenCalled();
   expect(restart.driver.lastCheckedAt()).toBe(1_800_000_000_000);
   await expect(restart.driver.checkForUpdates(true)).rejects.toThrow('offline');
-  expect(mocks.fetch).toHaveBeenCalledOnce();
+  expect(mocks.fetch).toHaveBeenCalledTimes(2);
+  expect(mocks.fetch).toHaveBeenNthCalledWith(2,
+    expect.stringMatching(/^https:\/\/api\.github\.com\/repos\/NCFXZ\/VoxCue\/releases\?/),
+    expect.objectContaining({ credentials: 'omit' }),
+  );
 });
 it('rechecks a cached archive replaced between startup verification and restore', async () => {
   const f = setup();
@@ -305,7 +312,7 @@ it('a complete installed version does not block a new hourly remote check', asyn
   mocks.fetch.mockClear();
   const restart = f.create();
   await restart.driver.checkForUpdates();
-  expect(mocks.fetch).toHaveBeenCalledTimes(2);
+  expect(mocks.fetch).toHaveBeenCalledTimes(3);
   expect(await restart.driver.restoreDownloadedUpdate()).toBe(false);
 });
 it.each(['signature', 'platform', 'key', 'json', 'replacement', 'link'])(
@@ -532,7 +539,7 @@ it.each([false, true])('verifies a crash-published archive once across check and
   await restart.driver.checkForUpdates(force);
   expect(await restart.driver.restoreDownloadedUpdate()).toBe(true);
   expect(verify).toHaveBeenCalledTimes(1);
-  expect(mocks.fetch).toHaveBeenCalledTimes(force ? 2 : 0);
+  expect(mocks.fetch).toHaveBeenCalledTimes(force ? 3 : 0);
   expect(await readFile(f.archive)).toEqual(f.bytes);
   const recovered = JSON.parse(await readFile(f.stateFile, 'utf8'));
   expect(recovered.download).toBeUndefined();
@@ -598,7 +605,7 @@ it('bounds tiny-chunk progress notifications while publishing the first bytes an
   expect(await readFile(f.archive)).toEqual(f.bytes);
 });
 
-it('reclaims only newly recorded authenticated archives after installation catches up', async () => {
+it('retains the installed ZIP as the differential baseline and reclaims only superseded owned ZIPs', async () => {
   const f = setup();
   await f.driver.checkForUpdates();
   await f.driver.downloadUpdate();
@@ -608,6 +615,10 @@ it('reclaims only newly recorded authenticated archives after installation catch
   mocks.version = f.update.version;
   const next = f.create();
   await next.driver.checkForUpdates();
+  expect(await readFile(f.archive)).toEqual(f.bytes);
+  await next.driver.dispose();
+  mocks.version = '0.2.3';
+  await f.create().driver.checkForUpdates();
   await expect(access(f.archive)).rejects.toMatchObject({ code: 'ENOENT' });
   expect(await readFile(unknown, 'utf8')).toBe('protected unknown recovery baseline');
 });
@@ -625,7 +636,7 @@ it.each(['changed', 'link', 'unknown-record'] as const)(
       await symlink(f.archive + '.recovery', f.archive);
     } else
       await writeFile(path.join(f.cache, 'archive-ownership-v1.json'), '{"version":99,"items":[]}');
-    mocks.version = f.update.version;
+    mocks.version = '0.2.3';
     const next = f.create();
     await next.driver.checkForUpdates();
     expect(await lstat(f.archive)).toBeDefined();
@@ -633,7 +644,7 @@ it.each(['changed', 'link', 'unknown-record'] as const)(
   },
 );
 it.each(['active', 'new-consumer', 'cancelled', 'hardlink'] as const)(
-  'retains an authenticated installed archive while %s and keeps its ownership record',
+  'retains a superseded authenticated archive while %s and keeps its ownership record',
   async (mode) => {
     const f = setup();
     await f.driver.checkForUpdates();
@@ -648,7 +659,7 @@ it.each(['active', 'new-consumer', 'cancelled', 'hardlink'] as const)(
       if (mode === 'cancelled') cancellation.abort();
       return mode === 'active' || (mode === 'new-consumer' && probes > 1);
     };
-    const work = ownership.collect(f.update.version, active, cancellation.signal);
+    const work = ownership.collect('0.2.3', active, cancellation.signal);
     if (mode === 'cancelled') await expect(work).rejects.toMatchObject({ name: 'AbortError' });
     else await work;
     expect(await readFile(f.archive)).toEqual(f.bytes);

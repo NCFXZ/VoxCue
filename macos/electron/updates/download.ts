@@ -1,10 +1,14 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
-import { createReadStream } from 'node:fs';
-import { open, lstat } from 'node:fs/promises';
-import type { SignedMacUpdate } from './manifest';
+import { constants, createReadStream, type Stats } from 'node:fs';
+import { open, lstat, type FileHandle } from 'node:fs/promises';
 import type { ReleaseFetch } from '../../../shared/electron/backend/updates/provider';
+import { macArchiveByteLimit } from '../../../shared/electron/backend/updates/releases';
 import { abortable } from '../../../shared/electron/backend/cancellable';
-import type { Stats } from 'node:fs';
+
+interface ArchiveIntegrity {
+  size: number;
+  sha512: string;
+}
 
 export class CorruptArchive extends Error {
   constructor(message: string, readonly observed: Stats) {
@@ -18,33 +22,43 @@ export function sameArchiveVersion(observed: Stats, current: Stats) {
     current.ctimeMs === observed.ctimeMs && current.mtimeMs === observed.mtimeMs;
 }
 
-export async function verifyDownload(file: string, update: SignedMacUpdate, signal?: AbortSignal) {
+export const openArchive = (file: string) =>
+  open(file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+
+export async function verifyDownload(file: string, update: ArchiveIntegrity, signal?: AbortSignal) {
   signal?.throwIfAborted();
-  if (update.size > 2 * 1024 ** 3) throw Error('Update archive too large');
-  const stat = await lstat(file);
-  if (!stat.isFile() || stat.isSymbolicLink() || stat.uid !== process.getuid!() || stat.nlink !== 1)
-    throw Error('Invalid update archive');
-  if (stat.size !== update.size) throw new CorruptArchive('Invalid update archive size', stat);
-  const hash = createHash('sha512');
-  for await (const chunk of createReadStream(file, { signal })) hash.update(chunk);
-  signal?.throwIfAborted();
-  const after = await lstat(file);
-  if (!sameArchiveVersion(stat, after))
-    throw Error('Update archive changed during verification');
-  if (!timingSafeEqual(hash.digest(), Buffer.from(update.sha512, 'base64')))
-    throw new CorruptArchive('Update archive checksum mismatch', stat);
-  return stat;
+  if (update.size > macArchiveByteLimit) throw Error('Update archive too large');
+  const input = await openArchive(file);
+  try {
+    const stat = await input.stat();
+    if (!stat.isFile() || stat.uid !== process.getuid!() || stat.nlink !== 1)
+      throw Error('Invalid update archive');
+    if (stat.size !== update.size) throw new CorruptArchive('Invalid update archive size', stat);
+    const hash = createHash('sha512');
+    for await (const chunk of createReadStream(file, { fd: input, signal, autoClose: false })) hash.update(chunk);
+    signal?.throwIfAborted();
+    if (!sameArchiveVersion(stat, await lstat(file)))
+      throw Error('Update archive changed during verification');
+    if (!timingSafeEqual(hash.digest(), Buffer.from(update.sha512, 'base64')))
+      throw new CorruptArchive('Update archive checksum mismatch', stat);
+    return stat;
+  } finally {
+    await input.close();
+  }
 }
 
-export async function downloadArchive(
+/** Stream an exact-length public response. Range bodies must identify their exact ZIP span. */
+export async function transferUpdateBytes(
   url: URL,
-  file: string,
-  update: SignedMacUpdate,
+  size: number,
   signal: AbortSignal,
   fetcher: ReleaseFetch,
-  progress: (percent: number) => void,
+  consume: (chunk: Uint8Array, signal: AbortSignal) => void | Promise<void>,
+  { range, beforeRead }: {
+    range?: { offset: number; archiveSize: number };
+    beforeRead?: () => Promise<void>;
+  } = {},
 ) {
-  if (update.size > 2 * 1024 ** 3) throw Error('Update archive too large');
   signal.throwIfAborted();
   const idle = new AbortController();
   signal = AbortSignal.any([signal, idle.signal]);
@@ -60,7 +74,11 @@ export async function downloadArchive(
   // A continuously advancing download has no total-duration throughput floor.
   progressDeadline(30_000);
   try {
-    const pending = fetcher(url, { signal, credentials: 'omit', redirect: 'follow' });
+    const bytes = range ? `${range.offset}-${range.offset + size - 1}` : undefined;
+    const pending = fetcher(url, {
+      signal, credentials: 'omit', redirect: 'follow',
+      ...(bytes ? { headers: { Range: `bytes=${bytes}`, 'Accept-Encoding': 'identity' } } : {}),
+    });
     void pending.then(
       (response) => {
         if (signal.aborted) void response.body?.cancel().catch(() => {});
@@ -69,56 +87,82 @@ export async function downloadArchive(
     );
     const response = await abortable(pending, signal);
     const length = response.headers.get('content-length');
-    if (!response.ok || !response.body || (length !== null && Number(length) !== update.size)) {
+    const encoding = response.headers.get('content-encoding');
+    if (response.status !== (range ? 206 : 200) || !response.body ||
+        (length !== null && Number(length) !== size) ||
+        (range && (response.headers.get('content-range') !== `bytes ${bytes}/${range.archiveSize}` ||
+          (encoding !== null && encoding !== 'identity')))) {
       void response.body?.cancel().catch(() => {});
       throw Error('Update download failed');
     }
-    const output = await open(file, 'wx', 0o600).catch(async (error) => {
-      void response.body?.cancel().catch(() => {});
-      throw error;
-    });
-    let reader: ReadableStreamDefaultReader<Uint8Array>;
     try {
-      reader = response.body.getReader();
+      await beforeRead?.();
     } catch (error) {
-      await output.close();
+      void response.body.cancel().catch(() => {});
       throw error;
     }
+    const reader = response.body.getReader();
     const abort = () => {
       void reader.cancel().catch(() => {});
     };
     signal.addEventListener('abort', abort, { once: true });
-    let bytes = 0;
+    let received = 0;
     try {
       for (;;) {
         signal.throwIfAborted();
         const chunk = await abortable(reader.read(), signal);
         if (chunk.done) break;
         signal.throwIfAborted();
-        bytes += chunk.value.length;
-        if (bytes > update.size) throw Error('Update archive exceeded expected length');
-        // FileHandle.write can return a short write.
-        let offset = 0;
-        while (offset < chunk.value.length) {
-          signal.throwIfAborted();
-          const { bytesWritten } = await output.write(chunk.value, offset);
-          if (!bytesWritten) throw Error('Update archive write failed');
-          offset += bytesWritten;
-          progressDeadline(120_000);
-        }
-        progress((bytes / update.size) * 100);
+        received += chunk.value.length;
+        if (received > size) throw Error('Update archive exceeded expected length');
+        await consume(chunk.value, signal);
+        if (chunk.value.length) progressDeadline(120_000);
       }
       signal.throwIfAborted();
-      if (bytes !== update.size) throw Error('Truncated update archive');
-      await output.sync();
+      if (received !== size) throw Error('Truncated update archive');
     } finally {
       signal.removeEventListener('abort', abort);
       void reader.cancel().catch(() => {});
       reader.releaseLock();
-      await output.close();
     }
-    return await verifyDownload(file, update, signal);
   } finally {
     clearTimeout(timer!);
   }
+}
+
+export async function writeUpdateBytes(output: FileHandle, chunk: Uint8Array, signal: AbortSignal) {
+  let offset = 0;
+  while (offset < chunk.length) {
+    signal.throwIfAborted();
+    const { bytesWritten } = await output.write(chunk, offset);
+    if (!bytesWritten) throw Error('Update archive write failed');
+    offset += bytesWritten;
+  }
+}
+
+export async function downloadArchive(
+  url: URL,
+  file: string,
+  update: ArchiveIntegrity,
+  signal: AbortSignal,
+  fetcher: ReleaseFetch,
+  progress: (percent: number) => void,
+) {
+  if (update.size > macArchiveByteLimit) throw Error('Update archive too large');
+  signal.throwIfAborted();
+  let output: FileHandle | undefined;
+  let bytes = 0;
+  try {
+    await transferUpdateBytes(url, update.size, signal, fetcher, async (chunk, active) => {
+      await writeUpdateBytes(output!, chunk, active);
+      bytes += chunk.length;
+      progress((bytes / update.size) * 100);
+    }, {
+      beforeRead: async () => { output = await open(file, 'wx', 0o600); },
+    });
+    await output!.sync();
+  } finally {
+    await output?.close();
+  }
+  return verifyDownload(file, update, signal);
 }

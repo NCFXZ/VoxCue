@@ -212,7 +212,7 @@ export async function checkProgressMotion(page, root) {
   );
   await section.locator('summary').press('Space');
   await section.evaluate(() => new Promise(requestAnimationFrame));
-  assert.equal((await section.boundingBox()).height, frames.closed.height);
+  assert.equal(await section.evaluate((node) => node.getBoundingClientRect().height), frames.closed.height);
   await toggle.press('Space');
   assert.equal((await content.boundingBox()).height, 0);
   assert.equal(await content.evaluate((node) => node.inert), true);

@@ -25,7 +25,7 @@ import os from 'node:os';
 import assert from 'node:assert/strict';
 
 const targetVersion = workspace.platformRequire('./package.json').version;
-const usesCurrentProfile = (version) => version === '1.3.1' || version === targetVersion;
+const usesCurrentProfile = (version) => ['1.3.1', '1.3.2', targetVersion].includes(version);
 const run = (command, args) => {
   const result = spawnSync(command, args, { encoding: 'utf8', timeout: 120000 });
   if (result.error || result.status !== 0)
@@ -42,9 +42,10 @@ async function snapshot(page, version = targetVersion) {
       request.onerror = () => reject(request.error);
     });
     try {
-      if (db.version !== (modern ? 2 : 1) || modern !== db.objectStoreNames.contains('interviewRecords') ||
+      const expectedSchema = modern ? 2 : 1;
+      if (db.version !== expectedSchema || modern !== db.objectStoreNames.contains('interviewRecords') ||
           (modern && localStorage.getItem('copilot-interview-history-v1') !== null))
-        throw Error('Unexpected profile database or retained legacy history');
+        throw Error(`Unexpected profile storage: schema ${db.version}, expected ${expectedSchema}`);
       const rows = await new Promise((resolve, reject) => {
         const names = modern ? ['bases', 'documents', 'interviewRecords', 'interviewDirectory'] : ['bases', 'documents'];
         const tx = db.transaction(names, 'readonly');

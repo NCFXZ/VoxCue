@@ -743,6 +743,15 @@ try {
   await noKnowledgeSettings();
   await category('面试设置').click();
   await settings.getByRole('heading', { name: '面试设置', exact: true }).waitFor();
+  if (process.platform === 'darwin') {
+    const microphoneCheck = settings.getByRole('button', { name: '检查麦克风', exact: true });
+    await microphoneCheck.waitFor();
+    await page.waitForFunction(() =>
+      [...document.querySelectorAll('dialog[open] button')]
+        .some((button) => button.textContent === '检查麦克风' && !button.disabled),
+    );
+    assert.equal(await settings.getByRole('button', { name: '打开音频权限设置', exact: true }).count(), 0);
+  }
   await page.screenshot({ animations: 'disabled' });
   await app.evaluate(({ BrowserWindow }) => {
     const window = BrowserWindow.getAllWindows().find((window) => !window.isDestroyed());

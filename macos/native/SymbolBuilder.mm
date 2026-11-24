@@ -10,15 +10,20 @@ int main(int argc, const char *argv[]) {
         NSData *data = [NSData dataWithContentsOfFile:@(argv[1])];
         NSDictionary *symbols = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:&error] : nil;
         if (![symbols isKindOfClass:[NSDictionary class]]) return 1;
+        // Use stock equivalents when building on Sonoma, which predates these symbols.
+        NSDictionary *fallbacks = @{
+            @"LinkOff": @"cable.connector.slash",
+            @"Loader": @"rays",
+            @"LogIn": @"arrow.left.square",
+            @"LogOut": @"arrow.right.square",
+        };
         NSMutableDictionary *resolved = [NSMutableDictionary dictionary];
         for (NSString *key in [[symbols allKeys] sortedArrayUsingSelector:@selector(compare:)]) {
             NSString *name = symbols[key];
             if (![name isKindOfClass:[NSString class]]) return 1;
             NSImage *symbol = [NSImage imageWithSystemSymbolName:name accessibilityDescription:nil];
-            // Sonoma predates these two glyphs. Use its native equivalents for builds on 14.x.
             if (!symbol) {
-                if ([key isEqualToString:@"LinkOff"]) name = @"cable.connector.slash";
-                if ([key isEqualToString:@"Loader"]) name = @"rays";
+                name = fallbacks[key] ?: name;
                 symbol = [NSImage imageWithSystemSymbolName:name accessibilityDescription:nil];
             }
             if (!symbol) { fprintf(stderr, "Unavailable SF Symbol: %s\n", [name UTF8String]); return 1; }
@@ -27,7 +32,7 @@ int main(int argc, const char *argv[]) {
             BOOL fontIncrease = [key isEqualToString:@"FontIncrease"];
             BOOL fontAdjustment = fontDecrease || fontIncrease;
             NSImageSymbolConfiguration *configuration = [NSImageSymbolConfiguration
-                configurationWithPointSize:20
+                configurationWithPointSize:24
                 weight:fontAdjustment ? NSFontWeightSemibold : NSFontWeightRegular
                 scale:NSImageSymbolScaleMedium];
             symbol = [symbol imageWithSymbolConfiguration:configuration];

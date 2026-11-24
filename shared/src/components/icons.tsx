@@ -1,5 +1,4 @@
 import type { ComponentType, CSSProperties } from 'react';
-import { RecordingWaveIcon } from './RecordingWaveIcon';
 import {
   Mic24Regular,
   SpinnerIos20Regular,
@@ -9,7 +8,7 @@ import {
   Dismiss24Regular,
   Eye24Regular,
   EyeOff24Regular,
-  CommentEdit24Regular,
+  Compose24Regular,
   History24Regular,
   Database24Regular,
   Settings24Regular,
@@ -60,6 +59,7 @@ import {
   Screenshot24Regular,
   Save24Regular,
   DocumentText24Regular,
+  TextBulletList24Regular,
   TextBulletListSquare24Regular,
   FontIncreaseRegular,
   FontDecreaseRegular,
@@ -109,7 +109,7 @@ export const Square = icon(Square24Regular);
 export const X = icon(Dismiss24Regular);
 export const Eye = icon(Eye24Regular);
 export const EyeOff = icon(EyeOff24Regular);
-export const CommentEdit = icon(CommentEdit24Regular);
+export const CommentEdit = icon(Compose24Regular);
 export const History = icon(History24Regular);
 export const Database = icon(Database24Regular);
 export const CloudDone = icon(CloudCheckmark24Regular);
@@ -139,7 +139,6 @@ export const MessageSquare = icon(Chat24Regular);
 
 export const Play = icon(Play24Regular);
 export const Pause = icon(Pause24Regular);
-export const Recording = RecordingWaveIcon;
 export const Locate = icon(MyLocation24Regular);
 export const Minimize = icon(ArrowMinimize24Regular);
 export const BackTen = icon(SkipBack1024Regular);
@@ -162,9 +161,11 @@ export const ChevronUp = icon(ChevronUp24Regular);
 export const ShieldCheck = icon(ShieldCheckmark24Regular);
 export const Expand = icon(ArrowMaximize24Regular);
 export const Person = icon(Person24Regular);
+export const personalInfoIconSize = 15;
 export const Screenshot = icon(Screenshot24Regular);
 export const Save = icon(Save24Regular);
 export const FileText = icon(DocumentText24Regular);
+export const BulletList = icon(TextBulletList24Regular);
 export const ListSquare = icon(TextBulletListSquare24Regular);
 export const FontIncrease = icon(FontIncreaseRegular);
 export const FontDecrease = icon(FontDecreaseRegular);

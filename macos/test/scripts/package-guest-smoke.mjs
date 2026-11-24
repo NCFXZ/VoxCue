@@ -15,9 +15,12 @@ const installOnly = process.argv.includes('--install-only');
 const runtimeOnly = process.argv.includes('--runtime-only');
 const upgradesOnly = process.argv.includes('--upgrades-only');
 const retainVM = process.argv.includes('--retain-vm');
-const upgradeVersions = upgradeBaselinesFor(process.argv.slice(2));
+const args = process.argv.slice(2);
+const selectedUpgrades = args.filter(arg => arg.startsWith('--from='));
+const upgradeVersions = upgradeBaselinesFor(args);
 if ((screenshotOnly && (installOnly || runtimeOnly || upgradesOnly)) || (upgradesOnly && (runtimeOnly || installOnly)) ||
-    process.argv.slice(2).some(arg => !arg.startsWith('--from=') &&
+    (selectedUpgrades.length && (screenshotOnly || (runtimeOnly && !installOnly))) ||
+    args.some(arg => !arg.startsWith('--from=') &&
       !['--screenshot-only', '--install-only', '--runtime-only', '--upgrades-only', '--retain-vm'].includes(arg)))
   throw Error('Use the package guest checks documented in TEST_GUEST.md.');
 // The VM is provisioned separately from an authenticated public image. It must
@@ -310,9 +313,9 @@ console.log('Guest isolated input staging complete; no routed network, clipboard
 `,
     300000,
   );
-  const installation = ['package-smoke.mjs', ['--install-archive']];
+  const installation = ['package-smoke.mjs', ['--install-archive', ...selectedUpgrades]];
   const checks = screenshotOnly ? [['package-screenshot-smoke.mjs', []]]
-    : upgradesOnly ? [['package-smoke.mjs', ['--upgrades-only', ...process.argv.slice(2).filter(arg => arg.startsWith('--from='))]]]
+    : upgradesOnly ? [['package-smoke.mjs', ['--upgrades-only', ...selectedUpgrades]]]
     : runtimeOnly ? [
       ['package-dmg-install.mjs', []],
       ['package-runtimes-smoke.mjs', []],
@@ -324,6 +327,7 @@ console.log('Guest isolated input staging complete; no routed network, clipboard
       ['package-dmg-install.mjs', []],
       ['package-security-smoke.mjs', []],
       ['package-runtimes-smoke.mjs', []],
+      ['package-screenshot-smoke.mjs', []],
       installation,
       ['components-smoke.mjs', []],
     ];

@@ -150,8 +150,23 @@ try {
   await page.getByRole('switch', { name: 'Turn microphone off', exact: true }).click();
   await page.getByRole('switch', { name: 'Turn microphone on', exact: true }).waitFor();
   assert.equal(await app.evaluate(() => globalThis.mobileUi.snapshot.microphoneMuted), true);
+  const autoAnswerDot = page.locator('.mobile-auto-answer').locator(
+    '[data-mobile-symbol^="radio"], .mobile-toggle-dot',
+  );
+  const assertDotSize = async (label) => {
+    const { css, rendered, expected } = await autoAnswerDot.evaluate((element) => {
+      const style = getComputedStyle(element);
+      const { width, height } = element.getBoundingClientRect();
+      const pixels = (value) => Math.round(value * devicePixelRatio);
+      return { css: [style.width, style.height], rendered: [pixels(width), pixels(height)], expected: pixels(11) };
+    });
+    assert.deepEqual(css, ['11px', '11px'], label);
+    assert.deepEqual(rendered, [expected, expected], label);
+  };
+  await assertDotSize('Auto answer off dot size');
   await page.locator('.mobile-auto-answer[aria-checked="false"]').click();
   await page.locator('.mobile-auto-answer[aria-checked="true"]').waitFor();
+  await assertDotSize('Auto answer on dot size');
   await checkPending(
     'ask',
     page.getByRole('button', { name: 'Send', exact: true }),

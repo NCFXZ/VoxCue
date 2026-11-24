@@ -14,7 +14,7 @@ export function LoginPage() {
             <AppLogo size={28} />
             <span>VoxCue</span>
           </div>
-          <div className="login-auth-content">
+          <div className="login-auth-content" data-mode={mode}>
             <div className="login-copy">
               <h1>
                 {mode === 'login'

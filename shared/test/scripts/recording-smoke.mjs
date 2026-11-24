@@ -10,6 +10,14 @@ import { holdControl } from './assert-download-button.mjs';
 import { assertMenuBackdrop } from './assert-menu-backdrop.mjs';
 import { captureRequested } from './capture-requested.mjs';
 
+const readWaveform = (svg) => svg.evaluate((element) => {
+  const { width, height } = element.getBoundingClientRect();
+  return {
+    size: [width, height],
+    viewBox: element.getAttribute('viewBox'),
+    shape: element.querySelector('path')?.getAttribute('d'),
+  };
+});
 const profile = path.join(testRoot, 'recording-profile');
 await mkdir(profile);
 const app = await electron.launch({
@@ -27,6 +35,9 @@ try {
   await main.getByRole('menuitem', { name: '设置', exact: true }).click();
   const settings = main.getByRole('dialog', { name: '设置', exact: true });
   await settings.getByRole('button', { name: '面试设置', exact: true }).click();
+  const previewWave = await readWaveform(settings.locator('.interview-preview-tools svg.recording-wave'));
+  assert.deepEqual(previewWave.size, [18, 18]);
+  assert.ok(previewWave.shape);
   const auto = settings.getByRole('switch', { name: '面试时自动录音', exact: true });
   assert.equal(await auto.getAttribute('aria-checked'), 'false');
   assert.equal(await settings.locator('.recording-preference').evaluate(el => getComputedStyle(el).borderBottomWidth), '0px');
@@ -71,7 +82,8 @@ try {
     main.getByRole('button', { name: '确认开始', exact: true }).click(),
   ]);
   floating.setDefaultTimeout(15000);
-  const wave = floating.locator('.floating-record .recording-wave path');
+  const liveWave = floating.locator('.floating-record svg.recording-wave');
+  const wave = liveWave.locator('path');
   const sampleWave = () => wave.evaluate(async path => {
     const frames = [];
     for (let i = 0; i < 12; i++) {
@@ -112,6 +124,7 @@ try {
   await floating.emulateMedia({ reducedMotion: 'reduce' });
   const still = await sampleWave();
   assert.equal(new Set(still.map(frame => frame.shape)).size, 1);
+  assert.deepEqual(await readWaveform(liveWave), previewWave);
   await floating.getByRole('button', { name: '停止录音', exact: true }).click();
   await floating.emulateMedia({ reducedMotion: 'no-preference' });
   const idle = await sampleWave();
@@ -202,11 +215,8 @@ try {
     animation.effect?.getTiming().iterations === Infinity || animation.playState !== 'running'));
   await player.hover({ position: { x: 20, y: 20 } });
   const expandButton = player.getByRole('button', { name: '展开播放器' });
-  const clipIcon = player.getByRole('button', { name: '选择录音' }).locator('svg');
-  const assertClipIcon = async () => {
-    if (process.platform === 'darwin') assert.equal(await clipIcon.getAttribute('data-sf-symbol'), 'waveform');
-    else assert.equal(await clipIcon.locator('path').getAttribute('d'), still[0].shape);
-  };
+  const clipIcon = player.getByRole('button', { name: '选择录音' }).locator('svg.recording-wave');
+  const assertClipIcon = async () => assert.deepEqual(await readWaveform(clipIcon), previewWave);
   await expandButton.waitFor();
   await assertClipIcon();
   await main.waitForFunction(() => document.querySelector('.record-player').offsetWidth === 118);

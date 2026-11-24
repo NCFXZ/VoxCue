@@ -372,17 +372,21 @@ try {
     }
     const geometry = async () => {
       await page.evaluate(() => document.activeElement?.blur());
-      await page.waitForFunction(() =>
-        [...document.querySelectorAll('.cloud-account-form input')].every(
-          (node) => getComputedStyle(node).transform === 'none',
-        ),
-      );
+      await page.waitForFunction(() => {
+        const form = document.querySelector('.cloud-account-form');
+        return form && !form.querySelector('.interview-reveal[data-open="false"]') &&
+          [...form.querySelectorAll('input')].every((node) => getComputedStyle(node).transform === 'none') &&
+          form.getAnimations({ subtree: true }).every((animation) =>
+            animation.effect?.getTiming().iterations === Infinity || animation.playState !== 'running',
+          );
+      });
       return page.evaluate(() => {
         const box = (s) => {
           const r = document.querySelector(s).getBoundingClientRect();
           return { x: r.x, y: r.y, width: r.width };
         };
         return {
+          mode: document.querySelector('.login-auth-content').dataset.mode,
           heading: box('.login-copy'),
           email: box('input[name="email"]'),
           password: box('input[name="password"]'),
@@ -540,6 +544,7 @@ try {
           return { top: r.top, bottom: r.bottom };
         };
         return {
+          height: innerHeight,
           error: rect('[role="alert"]'),
           footer: rect('.login-footer'),
           action: rect('button[type="submit"]'),
@@ -551,7 +556,10 @@ try {
         };
       });
       assert.ok(box.error.bottom <= box.action.top, 'Feedback must precede the primary action');
-      assert.ok(box.content.bottom <= box.footer.top, 'Content must reserve the fixed footer');
+      assert.ok(
+        box.content.bottom <= box.footer.top,
+        `Content must reserve the fixed footer at ${box.height}px height (content ${box.content.bottom}, footer ${box.footer.top})`,
+      );
       assert.ok(
         box.link.bottom <= box.footer.top,
         'Return link must remain visible above the footer',
@@ -635,8 +643,9 @@ try {
     console.log('VISUAL_DIRECTORY=' + directory);
     for (const r of rects) {
       for (const key of ['heading', 'email', 'password', 'footer']) {
-        assert.ok(Math.abs(r[key].x - rects[0][key].x) < 1);
-        assert.ok(Math.abs(r[key].y - rects[0][key].y) < 1);
+        const context = `${r.mode} ${key} ${JSON.stringify(r[key])}, login ${JSON.stringify(rects[0][key])}`;
+        assert.ok(Math.abs(r[key].x - rects[0][key].x) < 1, context);
+        assert.ok(Math.abs(r[key].y - rects[0][key].y) < 1, context);
       }
       assert.ok(Math.abs(r.form.width - r.email.width) < 1);
       assert.ok(Math.abs(r.form.width - r.submit.width) < 1);

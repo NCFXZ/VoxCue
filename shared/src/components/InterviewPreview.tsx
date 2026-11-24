@@ -16,6 +16,7 @@ import { useLoginPreviewPlayback } from './ui/useLoginPreviewPlayback';
 import { useFollowScroll } from './useFollowScroll';
 import { playSentMessageEnter } from '../lib/messageMotion';
 import { ChatActivity } from './ChatActivity';
+import { RecordingWaveIcon } from './RecordingWaveIcon';
 import './login-preview.css';
 import {
   ArrowUp,
@@ -24,7 +25,6 @@ import {
   Copy,
   MessageSquare,
   Settings,
-  Recording,
   EyeOff,
   Sparkles,
   Screenshot,
@@ -355,7 +355,7 @@ export function InterviewPreview({
               <EyeOff size={20} />
             </span>
             <span className="interview-preview-icon" data-interview-preview-button>
-              <Recording />
+              <RecordingWaveIcon />
             </span>
             <span className="interview-preview-icon danger-text" data-interview-preview-button>
               <Square size={17} />

@@ -4,7 +4,7 @@ import { readFileSync, type Stats } from 'node:fs';
 import { link, lstat, mkdir, realpath, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import type { UpdateDriver } from '../../../shared/electron/backend/updates/service';
-import { fetchPlatformUpdate } from '../../../shared/electron/backend/updates/provider';
+import { fetchPlatformUpdate, type ReleaseFetch } from '../../../shared/electron/backend/updates/provider';
 import {
   UpdateCache,
   platformUpdateInfo,
@@ -18,6 +18,7 @@ import {
 } from '../../../shared/electron/backend/updates/releases';
 import { signedMacUpdate, type SignedMacUpdate, publicUpdateKey } from './manifest';
 import { CorruptArchive, downloadArchive, sameArchiveVersion, verifyDownload } from './download';
+import { downloadDifferential } from './differential';
 import { installFeed } from './install-feed';
 import { MacArchiveOwnership } from './archives';
 
@@ -288,19 +289,34 @@ export class MacUpdateDriver extends EventEmitter implements UpdateDriver {
       await this.cache.beginDownload(info);
       let progressStep: number | undefined;
       try {
-        const verified = await downloadArchive(
+        const fetcher: ReleaseFetch = (input, init) => net.fetch(input instanceof URL ? input.href : input, init);
+        const progress = (percent: number) => {
+          const step = Math.floor(percent);
+          if (!this.disposed && !downloadSignal.aborted && step !== progressStep) {
+            progressStep = step;
+            this.emit('download-progress', { percent });
+          }
+        };
+        const partial = this.file(info, true);
+        let verified: Stats | undefined;
+        if (update.delta?.base.version === app.getVersion()) {
+          try {
+            verified = await downloadDifferential(info.selectedRelease, update, update.delta,
+              partial, downloadSignal, fetcher, progress);
+          } catch (error) {
+            downloadSignal.throwIfAborted();
+            if ((error as NodeJS.ErrnoException).code === 'EEXIST' &&
+                (error as NodeJS.ErrnoException).syscall === 'open') throw error;
+            await this.removePartial(info);
+          }
+        }
+        verified ??= await downloadArchive(
           releaseAssetUrl(info.selectedRelease, update.url),
-          this.file(info, true),
+          partial,
           update,
           downloadSignal,
-          (input, init) => net.fetch(input instanceof URL ? input.href : input, init),
-          (percent) => {
-            const step = Math.floor(percent);
-            if (!this.disposed && !downloadSignal.aborted && step !== progressStep) {
-              progressStep = step;
-              this.emit('download-progress', { percent });
-            }
-          },
+          fetcher,
+          progress,
         );
         downloadSignal.throwIfAborted();
         // Publish without replacing an unrelated file that arrived during the download.

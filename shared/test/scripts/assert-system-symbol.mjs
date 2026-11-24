@@ -7,7 +7,14 @@ export async function assertSystemSymbol(button, key, name, size) {
   const svg = button.locator('svg');
   assert.equal(await svg.getAttribute('data-sf-symbol'), name);
   assert.equal(await svg.getAttribute('data-sf-icon'), key);
-  assert.equal(await svg.evaluate(element => element.getBoundingClientRect().width), size);
+  const dimensions = await svg.evaluate((element, size) => {
+    const style = getComputedStyle(element);
+    const { width, height } = element.getBoundingClientRect();
+    const pixels = (value) => Math.round(value * devicePixelRatio);
+    return { css: [style.width, style.height], pixels: [pixels(width), pixels(height)], expected: pixels(size) };
+  }, size);
+  assert.deepEqual(dimensions.css, [`${size}px`, `${size}px`], key);
+  assert.deepEqual(dimensions.pixels, [dimensions.expected, dimensions.expected], key);
   const source = await svg.locator('mask image').evaluate(image =>
     new URL(image.getAttribute('href'), document.baseURI).href);
   const bytes = source.startsWith('data:image/png;base64,')

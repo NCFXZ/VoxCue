@@ -6,7 +6,8 @@ import { Button } from './ui/button';
 import * as Menu from './ui/dropdown-menu';
 import { Modal } from './ui/modal';
 import { RangeSlider } from './ui/range-slider';
-import { BackTen, Check, ChevronRight, Download, Expand, ForwardTen, Locate, Minimize, Pause, Play, Recording, X } from './icons';
+import { BackTen, Check, ChevronRight, Download, Expand, ForwardTen, Locate, Minimize, Pause, Play, X } from './icons';
+import { RecordingWaveIcon } from './RecordingWaveIcon';
 import './recordingPlayer.css';
 
 function clock(ms: number) {
@@ -380,7 +381,7 @@ export function RecordingPlayer({
     <Menu.Root open={menu} onOpenChange={setMenu}>
       <Menu.Trigger asChild>
         <Button size="icon" variant="ghost" aria-label={t('选择录音')}>
-          <Recording />
+          <RecordingWaveIcon />
         </Button>
       </Menu.Trigger>
       <Menu.Portal>

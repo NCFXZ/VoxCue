@@ -21,7 +21,7 @@
   border-radius: 0;
   color: var(--accent);
 }
-[data-mobile-symbol^='radio'] { width: 13px; height: 13px; --sf-mask: url('../../public/sf-symbols/EmptyCircle.png?no-inline'); }
+[data-mobile-symbol^='radio'] { width: 11px; height: 11px; --sf-mask: url('../../public/sf-symbols/EmptyCircle.png?no-inline'); }
 [data-mobile-symbol='radio-on'] { --sf-mask: url('../../public/sf-symbols/SelectedCircle.png?no-inline'); }
 .mobile-settings .mobile-setting-row { position: relative; }
 .mobile-settings .mobile-setting-row select { appearance: none; padding-inline-end: 32px; }

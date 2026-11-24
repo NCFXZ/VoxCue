@@ -187,14 +187,15 @@ try {
   await aiSettings.getByRole('heading', { name: 'AI 服务', exact: true }).waitFor();
   await page.waitForFunction(() => !document.documentElement.dataset.viewDirection);
   assert.equal(await aiSettings.locator('.ai-service-label img.service-brand-icon').count(), 2);
-  for (const [provider, action] of [
-    ['ChatGPT', '断开连接'],
-    ['GitHub Copilot', '连接'],
+  for (const [provider, actions] of [
+    ['ChatGPT', ['禁用', '退出登录']],
+    ['GitHub Copilot', ['登录']],
   ]) {
     const row = aiSettings.locator('.ai-service-row').filter({
       has: page.getByText(provider, { exact: true }),
     });
-    await row.getByRole('button', { name: action, exact: true }).waitFor();
+    for (const action of actions)
+      await row.getByRole('button', { name: action, exact: true }).waitFor();
   }
   for (const image of await aiSettings.locator('.ai-service-label img.service-brand-icon').all()) {
     await image.evaluate((image) => image.decode());

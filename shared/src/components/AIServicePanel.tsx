@@ -14,8 +14,7 @@ import { ApiConnectionPanel } from './ApiConnectionPanel';
 import { providerInfo } from '../services/providers';
 import chatGPTIcon from '../assets/chatgpt.svg?inline';
 import copilotIcon from '../assets/copilot.svg?inline';
-import { LogIn, Play, Square, X } from './icons';
-import { LogOut } from './LogoutIcon';
+import { LogIn, LogOut, Play, Square, X } from './icons';
 import { uiMessages } from '../../electron/contracts/uiMessages';
 
 const connectionNotices: Readonly<Record<string, string>> = {

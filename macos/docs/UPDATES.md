@@ -16,6 +16,16 @@ Mac 元数据保留 `edSignature` 与 `voxcueSignature`，每次缓存读取重�
 
 恢复不启动安装。只有显式安装且通过原有面试限制和保存握手后，才重验归档、创建随机 token 的本地 feed，继续 `begin → ready → commit → quit`；Sparkle 的归档验签保持。验证入口为 Mac `update-driver.test.ts`、共享 `update-cache.test.ts`、`updates-smoke.mjs` 与本机 `updates-native-smoke.mjs`，后者包含真实 Electron 传输的 owner loopback 缓存矩阵及原生安装流程。
 
+## 网络增量与全量兜底
+
+从 1.3.3 起，Mac 下载器可复用 `userData/updates/archives` 中与运行版本对应的完整 ZIP。它先核对旧包的大小和 SHA512，再从所选发行源匿名获取 `VoxCue-<版本>-arm64.zip.delta.json`。清单的独立 Ed25519 签名将增量计划绑定至旧版版本、旧包摘要和目标 ZIP。完整 ZIP 的 v1 签名格式继续兼容旧客户端。
+
+增量计划列出可从旧 ZIP 复制的相同字节区间，其余区间由同源 HTTP Range 请求取得。下载器校验每次响应的 206 状态、`Content-Range` 和长度。拼出的 ZIP 必须与目标的签名清单长度和 SHA512 完全一致，才进入原有缓存与 Sparkle 安装流程。旧包缺失或不匹配、计划未提供或认证失败、Range 失败及组装错误会改走已认证的全量下载。用户取消时停止传输并清理半成品。
+
+当前运行版本的已验证 ZIP 保留作下一次更新的基线。由 DMG 首装且没有旧 ZIP 时，先用全量下载建立基线。已发布的 1.3.2 客户端仍用原有全量更新流程，增量能力随新版客户端生效。
+
+在 `macos/` 执行 `pnpm package:installer --delta-from=/绝对路径/旧版发行目录` 生成增量计划。该目录包含旧版原始 ZIP 和 `latest-mac.yml`，打包器使用已有固定公钥认证旧包。`node test/scripts/updates-differential-smoke.mjs` 验证真实 Electron 回环传输、两渠道选择、全量回退和取消。用 `--base=/绝对路径/旧版.zip --target=/绝对路径/新版.zip` 可核对实际归档的传输量和组装摘要。
+
 ## 历史发行
 
 0.5.9、0.5.10和0.5.11的当时验包与发行证据分别保存在对应交接/验证记录中，不作为当前下载或系统要求。2026-10-27 Windows任务已将旧应用发行转为可恢复草稿，模型资源保持公开；不得为恢复Mac下载而自行公开旧版。当前版本沿用原代码签名、凭据助手与Ed25519身份。
@@ -60,13 +70,14 @@ corepack pnpm test:package
 
 签名材料检查 owner、0700／0600、普通节点、单链接与真实路径。持有人可用 `node scripts/update-key-backup.mjs --backup=/绝对私有离线路径` 创建 scrypt＋AES-GCM 加密更新身份备份，或以 `--verify=/绝对备份路径` 交互认证同一公钥；口令只在本机隐藏输入，不进入参数、环境或输出。工具拒绝覆盖与身份不符，备份不轮换密钥，验证不读取现用私钥。
 
-发行仅包含 `macos/release/<版本>/` 内三项：
+`macos/release/<版本>/` 包含以下发行资产。
 
 - `VoxCue-<版本>-arm64.dmg`：首次安装。
 - `VoxCue-<版本>-arm64.zip`：完整应用更新包。
-- `latest-mac.yml`：版本、文件名/大小、SHA512、归档 Ed25519 签名与清单签名。
+- `VoxCue-<版本>-arm64.zip.delta.json` 在指定已验证旧包时生成，供新版下载器复用旧 ZIP。
+- `latest-mac.yml` 包含版本、文件名、大小、SHA512、归档签名及可选的增量签名。
 
-当前更新与组件下载仓库为公开 NCFXZ/VoxCue。按用户当次授权向该仓库的指定正式 Release 追加本平台三项；只有明确需要时新建发行，已有 Windows 和旧版本资产不覆盖。先上传 DMG、ZIP，最后上传 latest-mac.yml，核对齐全后发布。当次发行范围以用户请求及PROGRESS为准，沿用操作前核对的Latest状态。两个平台按对应完整资产的最高正式数字版本选版，不依赖统一 Latest；失败明确报错。发行与源码推送按当前用户授权执行，不能从历史发行记录继承授权。打包脚本拒绝覆盖现有发行目录。
+当前更新与组件下载仓库为公开 NCFXZ/VoxCue。按用户当次授权向指定正式 Release 追加本平台资产，保留已发布的 Windows 和旧版本资产。先上传 DMG、ZIP 和已有的增量计划，再上传 `latest-mac.yml`。按[下载渠道](../../shared/docs/DOWNLOAD_CHANNELS.md)同步 CNB。两个平台按各自完整资产的最高正式数字版本选版。发行与源码推送按当前用户授权执行。打包脚本拒绝覆盖现有发行目录。
 
 ## 信任与隔离
 

@@ -8715,6 +8715,15 @@ svg[data-ui-icon] {
   .login-auth-content .cloud-account-form {
     gap: 12px;
   }
+  .login-auth-content:is([data-mode='register'], [data-mode='reset']) {
+    padding-block-start: 12px;
+  }
+  .login-shell .login-auth-content:is([data-mode='register'], [data-mode='reset']) .login-copy {
+    margin-bottom: 12px;
+  }
+  .login-auth-content:is([data-mode='register'], [data-mode='reset']) .cloud-account-form {
+    gap: 8px;
+  }
   .login-auth-content .cloud-account-form label {
     gap: 6px;
   }

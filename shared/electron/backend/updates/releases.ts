@@ -7,6 +7,9 @@ export type ReleaseTarget = 'windows-x64' | 'macos-arm64';
 export const releasePageSize = 100;
 export const releasePageLimit = 10;
 export const manifestByteLimit = 128 * 1024;
+export const macArchiveByteLimit = 2 * 1024 ** 3;
+export const macDeltaCopyLimit = 64;
+export const macDeltaName = (archive: string) => archive + '.delta.json';
 
 export function releaseTarget(platform: string, arch: string): ReleaseTarget | undefined {
   if (platform === 'win32' && arch === 'x64') return 'windows-x64';
@@ -25,6 +28,14 @@ export interface ReleaseCandidate {
   publishedAt: number;
   manifest: string;
   binary: ReleaseAsset;
+  delta?: ReleaseAsset;
+}
+export interface MacDeltaFile {
+  url: string;
+  size: number;
+  sha512: string;
+  base: { version: string; size: number; sha512: string };
+  signature: string;
 }
 const record = (value: unknown): value is Record<string, unknown> =>
   !!value && typeof value === 'object' && !Array.isArray(value);
@@ -78,16 +89,45 @@ export function releaseCandidates(value: unknown, target: ReleaseTarget): Releas
       } catch {
         continue;
       }
+      const delta = target === 'macos-arm64' ? assets.get(macDeltaName(binary.name)) : undefined;
       candidates.push({
         version: match[1],
         tag: release.tag_name,
         publishedAt: Date.parse(release.published_at),
         manifest,
         binary,
+        ...(delta && delta.size <= manifestByteLimit ? { delta } : {}),
       });
     }
   }
   return candidates;
+}
+
+/** The optional Mac byte-range plan belongs to the same release as the full ZIP. */
+export function macDeltaFile(metadata: unknown, candidate: ReleaseCandidate): MacDeltaFile | undefined {
+  if (candidate.manifest !== 'latest-mac.yml') return;
+  const archive = manifestFile(metadata, candidate);
+  const raw = (metadata as { files: Array<Record<string, unknown>> }).files.find(file => file.url === archive.url)!;
+  const value = raw.delta;
+  if (value === undefined) return;
+  if (!record(value) || !record(value.base) || !candidate.delta ||
+      value.url !== macDeltaName(archive.url) || value.url !== candidate.delta.name ||
+      value.size !== candidate.delta.size || !Number.isSafeInteger(value.size) ||
+      candidate.delta.size <= 0 || candidate.delta.size > manifestByteLimit ||
+      typeof value.sha512 !== 'string' || !/^[A-Za-z0-9+/]{86}==$/.test(value.sha512) ||
+      typeof value.signature !== 'string' || !/^[A-Za-z0-9+/]{86}==$/.test(value.signature) ||
+      typeof value.base.version !== 'string' || compareVersions(value.base.version, candidate.version) >= 0 ||
+      typeof value.base.size !== 'number' || !Number.isSafeInteger(value.base.size) ||
+      value.base.size <= 0 || value.base.size > macArchiveByteLimit ||
+      typeof value.base.sha512 !== 'string' || !/^[A-Za-z0-9+/]{86}==$/.test(value.base.sha512))
+    throw Error('Invalid Mac differential metadata');
+  return {
+    url: value.url as string,
+    size: candidate.delta.size,
+    sha512: value.sha512,
+    base: { version: value.base.version, size: value.base.size, sha512: value.base.sha512 },
+    signature: value.signature,
+  };
 }
 
 export function releaseAssetUrl(candidate: ReleaseCandidate, name: string) {

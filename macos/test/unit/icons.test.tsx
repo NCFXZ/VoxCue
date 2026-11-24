@@ -2,6 +2,7 @@ import { beforeAll, describe, it, expect } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import ts from 'typescript';
 import symbols from '../../src/symbols.json';
 import vite from '../../../shared/vite.config.mjs';
 
@@ -11,14 +12,29 @@ describe.skipIf(process.platform !== 'darwin')('Mac SF Symbols 的共享界面�
     icons = await import('../../src/icons');
   });
   it('覆盖全部现有图标接口且不改变尺寸、颜色继承和无障碍归属', () => {
-    const source = readFileSync(path.resolve('../shared/src/components/icons.tsx'), 'utf8');
-    const names = [...source.matchAll(/export const (\w+) = /g)].map((item) => item[1]).sort();
+    const file = path.resolve('../shared/src/components/icons.tsx');
+    const source = ts.createSourceFile(file, readFileSync(file, 'utf8'), ts.ScriptTarget.Latest);
+    const names = source.statements.flatMap((statement) => {
+      if (ts.isExportDeclaration(statement) && !statement.isTypeOnly &&
+          statement.exportClause && ts.isNamedExports(statement.exportClause)) {
+        return statement.exportClause.elements.filter((item) => !item.isTypeOnly).map((item) => item.name.text);
+      }
+      if (ts.isVariableStatement(statement) &&
+          statement.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword)) {
+        return statement.declarationList.declarations.map((item) => item.name.getText(source));
+      }
+      return [];
+    }).sort();
     expect(Object.keys(icons).sort()).toEqual(names);
     const controlMasks = ['src/control-symbols.css', 'src/mobile/symbols.css'].flatMap(file =>
       [...readFileSync(file, 'utf8').matchAll(/sf-symbols\/(\w+)\.png/g)].map(match => match[1]),
     );
-    expect(Object.keys(symbols).sort()).toEqual([...new Set([...names, ...controlMasks])].sort());
-    for (const Icon of Object.values(icons)) {
+    const iconNames = names.filter((name) => name !== 'personalInfoIconSize');
+    expect(Object.keys(symbols).sort()).toEqual([...new Set([...iconNames, ...controlMasks])].sort());
+    expect(icons.personalInfoIconSize).toBe(16);
+    for (const name of iconNames) {
+      const Icon = icons[name as keyof typeof icons];
+      if (typeof Icon !== 'function') throw Error('Missing Mac icon component: ' + name);
       const html = renderToStaticMarkup(<Icon size={18} />);
       expect(html).toContain('aria-hidden="true"');
       expect(html).toContain('width:18px;height:18px;flex-shrink:0');

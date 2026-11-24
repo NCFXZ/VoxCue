@@ -82,7 +82,8 @@ export class MacArchiveOwnership {
     for (const info of items) {
       signal.throwIfAborted();
       const file = path.join(this.directory, 'archives', info.selectedRelease.binary.name);
-      if (compareVersions(info.version, installed) > 0 || active(file)) {
+      // The ZIP of the running release is the next differential's baseline.
+      if (compareVersions(info.version, installed) >= 0 || active(file)) {
         retained.push(info);
         continue;
       }

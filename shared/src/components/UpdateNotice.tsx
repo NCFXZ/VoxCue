@@ -4,7 +4,7 @@ import { openChatLink } from '../services/chat';
 import { releaseNotesUrl } from '../services/updates';
 import { useUpdates } from '../stores/updates';
 import { InterviewReveal } from './InterviewReveal';
-import { ListSquare } from './icons';
+import { BulletList } from './icons';
 import { NoticeCloseButton } from './NoticeActions';
 import { Button } from './ui/button';
 
@@ -29,7 +29,7 @@ export function UpdateNotice() {
                 event.preventDefault();
                 setLinkError(null);
                 void openChatLink(url).catch(() => setLinkError('无法打开更新日志，请稍后重试。'));
-              }}><ListSquare size={16} />{t('查看更新日志')}</a>
+              }}><BulletList size={16} />{t('查看更新日志')}</a>
             </Button>
             <NoticeCloseButton label={t('关闭提示')} onClick={dismiss} />
           </div>

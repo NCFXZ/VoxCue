@@ -1,6 +1,8 @@
 import { createPublicKey, verify } from 'node:crypto';
 import {
+  macDeltaFile,
   manifestFile,
+  type MacDeltaFile,
   type ReleaseCandidate,
 } from '../../../shared/electron/backend/updates/releases';
 
@@ -23,6 +25,18 @@ export function macUpdatePayload(value: {
       value.minimumSystemVersion,
     ]),
   );
+}
+
+export function macDeltaPayload(
+  archive: { version: string; url: string; size: number; sha512: string },
+  delta: Omit<MacDeltaFile, 'signature'>,
+) {
+  return Buffer.from(JSON.stringify([
+    'voxcue-macos-delta-v1',
+    archive.version, archive.url, archive.size, archive.sha512,
+    delta.base.version, delta.base.size, delta.base.sha512,
+    delta.url, delta.size, delta.sha512,
+  ]));
 }
 
 export function publicUpdateKey(base64: string) {
@@ -49,15 +63,27 @@ export function signedMacUpdate(metadata: unknown, candidate: ReleaseCandidate, 
     minimumSystemVersion: selected.minimumSystemVersion ?? '14.2',
     edSignature: raw.edSignature as string,
   };
+  const key = publicUpdateKey(publicKey);
   if (
     !verify(
       null,
       macUpdatePayload(result),
-      publicUpdateKey(publicKey),
+      key,
       Buffer.from(raw.voxcueSignature as string, 'base64'),
     )
   )
     throw Error('Untrusted Mac update manifest');
-  return result;
+  // Keep the v1 ZIP envelope readable by previous clients. The optional
+  // delta has its own signature binding it to that exact ZIP and baseline.
+  let delta: MacDeltaFile | undefined;
+  try {
+    const supplemental = macDeltaFile(metadata, candidate);
+    if (supplemental && verify(null, macDeltaPayload(result, supplemental), key,
+        Buffer.from(supplemental.signature, 'base64')))
+      delta = supplemental;
+  } catch {
+    // Older releases and broken mirrors still offer the authenticated ZIP.
+  }
+  return { ...result, ...(delta ? { delta } : {}) };
 }
 export type SignedMacUpdate = ReturnType<typeof signedMacUpdate>;

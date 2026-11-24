@@ -10,7 +10,7 @@ import workspace from './workspace.mjs';
 // succeeds. Existing platform entries remain until their replacement is complete.
 const require = workspace.platformRequire;
 const backend = path.join(workspace.platformRoot, 'dist-electron/shared/electron/backend');
-const { releaseCandidates, compareVersions, manifestFile } = require(
+const { releaseCandidates, compareVersions, manifestFile, macDeltaFile } = require(
   path.join(backend, 'updates/releases.js'),
 );
 const { cnbReleaseIndex, downloadUrl, readPublicText } = require(
@@ -71,7 +71,9 @@ for (const target of ['windows-x64', 'macos-arm64']) {
     raw,
     'Mirror manifest differs from GitHub',
   );
-  const selected = manifestFile(yaml.load(raw), candidate);
+  const info = yaml.load(raw);
+  const selected = manifestFile(info, candidate);
+  const delta = macDeltaFile(info, candidate);
   const response = await fetch(downloadUrl('cnb', tag, selected.url), {
     credentials: 'omit',
     signal,
@@ -87,6 +89,15 @@ for (const target of ['windows-x64', 'macos-arm64']) {
   assert.equal(bytes, selected.size);
   assert.equal(hash.digest('base64'), selected.sha512, 'Mirror installer checksum differs');
   const names = [candidate.manifest, selected.url];
+  if (delta) {
+    for (const source of ['github', 'cnb']) {
+      const plan = await text(downloadUrl(source, tag, delta.url), delta.size);
+      assert.equal(Buffer.byteLength(plan), delta.size);
+      assert.equal(createHash('sha512').update(plan).digest('base64'), delta.sha512,
+        'Differential plan differs from the manifest');
+    }
+    names.push(delta.url);
+  }
   if (target === 'windows-x64') {
     const name = selected.url + '.blockmap';
     const maps = await Promise.all(
