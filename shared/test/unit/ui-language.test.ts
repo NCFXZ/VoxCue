@@ -128,6 +128,14 @@ describe('interface language', () => {
     expect(translateUI('查看面试记录：{0}', 'en', [long])).toBe('View interview: ' + long);
   });
 
+  it('localizes the completed answer count in interview history rows', () => {
+    expect(translateUI('1 个回答', 'en')).toBe('1 answer');
+    expect(translateUI('{0} 个回答', 'en', [0])).toBe('0 answers');
+    expect(translateUI('{0} 个回答', 'en', [2])).toBe('2 answers');
+    expect(translateUI('1 个回答', 'zh-CN')).toBe('1 个回答');
+    expect(translateUI('{0} 个回答', 'zh-CN', [2])).toBe('2 个回答');
+  });
+
   it('translates proposal field errors without translating the model-provided field name', () => {
     expect(translateUI('资料更新包含未知字段：targetRole。', 'en'))
       .toBe('The profile update contains an unknown field: targetRole.');

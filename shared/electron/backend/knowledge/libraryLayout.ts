@@ -11,6 +11,7 @@ export const ownerFile = 'owner.json';
 export const uuid = '[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}';
 export const catalogFile = new RegExp(`^(?:catalog\\.json|catalog-backup-${uuid}\\.json|catalog-${uuid}\\.tmp)$`);
 const pendingBackup = new RegExp(`^\\.catalog-backup-${uuid}\\.tmp$`);
+const pendingOwner = new RegExp(`^owner\\.json\\.${uuid}\\.tmp$`);
 export const legacyIndexFile = (name: string) => catalogFile.test(name) || pendingBackup.test(name) ||
   name === '.library-erasure.json' || name === '.index-batch.json';
 export const ownedTable = /^chunks_[a-f0-9]+$/;
@@ -96,9 +97,16 @@ export async function createLibraryFolder(folder: string, baseId: string) {
   await ensureDirectory(folder);
   const file = path.join(folder, ownerFile);
   if (!(await checkedFile(file))) {
-    // A crash can leave a directory before the owner file is published.
-    // Only a previously empty directory can acquire its first owner.
-    if ((await readdir(folder)).length) throw invalidLayout();
+    // An interrupted atomic owner write can leave a private temporary file.
+    // Validate the entire directory before retiring any incomplete writes.
+    const pending = await Promise.all((await readdir(folder)).map(async name => {
+      if (!pendingOwner.test(name)) throw invalidLayout();
+      const temporary = path.join(folder, name);
+      const info = await checkedFile(temporary);
+      if (info && info.nlink !== 1) throw invalidLayout();
+      return temporary;
+    }));
+    for (const temporary of pending) await rm(temporary, { force: true });
     await atomicFile(file, JSON.stringify({ version: 1, baseId }));
     await syncDirectory(path.dirname(folder));
   }

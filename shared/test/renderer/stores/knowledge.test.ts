@@ -14,7 +14,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('../../../../shared/src/services/knowledge', () => ({
   localKnowledge: mocks,
   validateFiles: mocks.validateFiles,
-  documentRevision: () => 'reviewed',
+  documentRevision: (value?: { localRevision?: string }) => value ? value.localRevision ?? 'reviewed' : null,
   queueKnowledgeRemoval: mocks.queueKnowledgeRemoval,
   completeKnowledgeRemoval: mocks.completeKnowledgeRemoval,
   listKnowledgeRemovals: mocks.listKnowledgeRemovals,
@@ -174,17 +174,31 @@ describe('知识库对抗性状态切换', () => {
     mocks.listDocuments.mockResolvedValue([{ id: 'doc', baseId: 'base' }]);
     await useKnowledge.getState().open('base');
     mocks.queueKnowledgeRemoval.mockRejectedValueOnce(new Error('合成任务保存失败'));
-    expect(await useKnowledge.getState().removeDocument('doc')).toBe(false);
+    expect(await useKnowledge.getState().removeDocument('doc', 'reviewed')).toBe(false);
     expect(useKnowledge.getState().error).toBe('合成任务保存失败');
     expect(mocks.completeKnowledgeRemoval).not.toHaveBeenCalled();
     mocks.completeKnowledgeRemoval.mockRejectedValueOnce(new Error('合成后台删除失败'));
-    expect(await useKnowledge.getState().removeDocument('doc')).toBe(true);
+    expect(await useKnowledge.getState().removeDocument('doc', 'reviewed')).toBe(true);
     expect(useKnowledge.getState().busy).toBe(false);
     await vi.waitFor(() => expect(useKnowledge.getState().removalError).toBe('合成后台删除失败'));
     expect(useKnowledge.getState().removals).toHaveLength(1);
     await useKnowledge.getState().resumeRemovals();
     expect(useKnowledge.getState().removals).toEqual([]);
     expect(mocks.completeKnowledgeRemoval).toHaveBeenCalledTimes(2);
+  });
+  it('拒绝将旧确认用于已刷新的知识库或同名文档', async () => {
+    const base = { id: 'base', name: '新名称', createdAt: 1, localRevision: 'updated' };
+    const blob = new File(['replacement'], 'doc.txt');
+    const doc = { id: 'doc', baseId: base.id, name: blob.name, type: blob.type, size: blob.size,
+      createdAt: 1, blob, localRevision: 'updated' };
+    useKnowledge.setState({ bases: [base], documents: [doc] });
+
+    expect(await useKnowledge.getState().removeBase('reviewed')).toBe(false);
+    expect(await useKnowledge.getState().removeDocument(doc.id, 'reviewed')).toBe(false);
+    expect(mocks.queueKnowledgeRemoval).not.toHaveBeenCalled();
+    expect(useKnowledge.getState()).toMatchObject({
+      bases: [base], documents: [doc], error: '资料已更改，请重新确认删除。', errorBaseId: base.id,
+    });
   });
   it('切换知识库后忽略旧列表失败，列表读取保留操作错误', async () => {
     let reject!: (error: Error) => void;
@@ -243,7 +257,7 @@ describe('知识库对抗性状态切换', () => {
       await complete?.(job);
     });
     await useKnowledge.getState().open('base');
-    expect(await useKnowledge.getState().removeDocument('old')).toBe(true);
+    expect(await useKnowledge.getState().removeDocument('old', 'reviewed')).toBe(true);
     const refreshing = useKnowledge.getState().open('base');
     deletion.resolve();
     await useKnowledge.getState().resumeRemovals();
@@ -328,7 +342,7 @@ describe('知识库对抗性状态切换', () => {
       await pending.promise;
       await complete?.(job);
     });
-    expect(await useKnowledge.getState().removeBase()).toBe(true);
+    expect(await useKnowledge.getState().removeBase('reviewed')).toBe(true);
     expect(useKnowledge.getState().selectedId).toBeNull();
     await useKnowledge.getState().open('other');
     pending.resolve();

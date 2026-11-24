@@ -875,6 +875,16 @@ try {
   await openModelMenu(page);
   await page.getByRole('menuitemradio', { name: longName, exact: true }).click();
   await page.keyboard.press('Escape');
+  const personalInfoButton = page.getByRole('button', { name: '个人信息', exact: true });
+  const personalInfoIcon = await personalInfoButton.locator('svg[data-ui-icon]').evaluate((element) => {
+    const { width, height } = element.getBoundingClientRect();
+    return { width, height };
+  });
+  check(
+    'personal-info-icon-size',
+    Math.abs(personalInfoIcon.width - 16) < 0.5 && Math.abs(personalInfoIcon.height - 16) < 0.5,
+    personalInfoIcon,
+  );
   const composerGeometry = () =>
     page.locator('.composer').evaluate((element) => {
       const box = element.getBoundingClientRect();
@@ -902,7 +912,7 @@ try {
       ({ BrowserWindow }, size) => BrowserWindow.getAllWindows()[0].setSize(...size),
       [width, height],
     );
-    await page.getByRole('button', { name: '个人信息', exact: true }).click();
+    await personalInfoButton.click();
     await page.locator('.personal-panel').waitFor();
     await settle(page);
     for (const theme of ['light', 'dark']) {

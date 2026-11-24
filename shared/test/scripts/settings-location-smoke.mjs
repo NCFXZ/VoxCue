@@ -145,6 +145,19 @@ try {
   floating.setDefaultTimeout(15000);
   floating.on('pageerror', error => errors.push(error.message));
   await floating.getByRole('button', { name: '面试设置', exact: true }).waitFor();
+  if (process.platform === 'win32') {
+    // The renderer can paint while the native interview surface is still hidden.
+    const interview = await app.browserWindow(floating);
+    try {
+      await interview.evaluate(async (window) => {
+        const deadline = performance.now() + 5000;
+        while (!window.isDestroyed() && !window.isVisible() && performance.now() < deadline)
+          await new Promise(resolve => setTimeout(resolve, 25));
+        if (window.isDestroyed() || !window.isVisible())
+          throw Error('Interview window did not become visible before native focus');
+      });
+    } finally { await interview.dispose(); }
+  }
   await focusUiWindow(app, floating);
   await floating.emulateMedia({ reducedMotion: 'reduce' });
   await floating.getByRole('button', { name: '面试设置', exact: true }).click();

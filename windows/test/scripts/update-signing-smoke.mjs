@@ -12,20 +12,22 @@ assert.equal(probe('desktop').interactive, true);
 const root = path.join(testRoot, 'signing/windows');
 const script = path.join(root, 'scripts/update-signing.mjs');
 const output = path.join(root, 'release/installer');
-const compiled = path.join(root, 'dist-electron/shared/electron/backend/updates');
+const compiled = 'dist-electron/shared/electron';
 await mkdir(path.dirname(script), { recursive: true });
 await mkdir(output, { recursive: true });
-await mkdir(compiled, { recursive: true });
 await copyFile('scripts/update-signing.mjs', script);
-for (const file of ['windowsManifest.js', 'releases.js', 'cache.js'])
-  await copyFile(
-    path.join('dist-electron/shared/electron/backend/updates', file),
-    path.join(compiled, file),
-  );
-await copyFile(
-  'dist-electron/shared/electron/backend/atomicFile.js',
-  path.join(compiled, '../atomicFile.js'),
-);
+for (const file of [
+  'backend/updates/windowsManifest.js',
+  'backend/updates/releases.js',
+  'backend/updates/cache.js',
+  'backend/atomicFile.js',
+  'backend/downloads.js',
+  'contracts/versions.js',
+]) {
+  const staged = path.join(root, compiled, file);
+  await mkdir(path.dirname(staged), { recursive: true });
+  await copyFile(path.join(compiled, file), staged);
+}
 const env = { ...process.env, NODE_PATH: path.resolve('node_modules') };
 const run = (args, success = true) => {
   assert.equal(probe('desktop').interactive, true);

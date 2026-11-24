@@ -45,6 +45,7 @@ export function KnowledgePage({ onComponentSettings }: { onComponentSettings?: O
   const [dragging, setDragging] = useState(false);
   const [gridReady, setGridReady] = useState(state.bases.length > 0);
   const base = state.bases.find((item) => item.id === state.selectedId);
+  const baseRevision = documentRevision(base);
   const removalAlert = state.removalError && (
     <div role="alert" className="inline-error knowledge-inline-error">
       <span>{t(state.removalError)}</span>
@@ -186,11 +187,11 @@ export function KnowledgePage({ onComponentSettings }: { onComponentSettings?: O
                 aria-label={t('删除知识库')}
                 target={t('知识库：') + base.name}
                 warning={t('将删除这个知识库及全部本地文档，无法恢复')}
-                revision={documentRevision(base)}
+                revision={baseRevision}
                 active={!editing}
                 disabled={state.busy || removingBase}
                 onConfirm={() =>
-                  useKnowledge.getState().selectedId === base.id ? state.removeBase() : false
+                  useKnowledge.getState().selectedId === base.id ? state.removeBase(baseRevision) : false
                 }
               />
             </>
@@ -289,6 +290,7 @@ export function KnowledgePage({ onComponentSettings }: { onComponentSettings?: O
             ] : !state.documents.length ? [
               <p className="empty-inline document-empty" key="empty">{t('当前知识库还没有文档')}</p>,
             ] : state.documents.map((doc) => {
+                const revision = documentRevision(doc);
                 const task = index.tasks[doc.id];
                 const deleting = index.deletingDocumentIds?.has(doc.id);
                 const removing = removingBase || removingFiles.has(doc.id);
@@ -298,7 +300,7 @@ export function KnowledgePage({ onComponentSettings }: { onComponentSettings?: O
                 const error = !removing && !deleting && task?.phase === 'failed' ? task.error : undefined;
                 return (
                   <div className="document-row" key={doc.id}
-                    data-motion-revision={JSON.stringify([documentRevision(doc), label?.replace(/\d+%/, ''), error])}>
+                    data-motion-revision={JSON.stringify([revision, label?.replace(/\d+%/, ''), error])}>
                     <FileText size={18} />
                     <div className="document-details">
                       <strong>{doc.name}</strong>
@@ -320,10 +322,10 @@ export function KnowledgePage({ onComponentSettings }: { onComponentSettings?: O
                         disabled={state.busy || removing}
                         active={!editing}
                         target={t('文档：') + doc.name}
-                        revision={documentRevision(doc)}
+                        revision={revision}
                         warning={t('将删除原件及当前索引，无法恢复')}
                         aria-label={t('删除文档 ') + doc.name}
-                        onConfirm={() => useKnowledge.getState().selectedId === base.id ? state.removeDocument(doc.id) : false}
+                        onConfirm={() => useKnowledge.getState().selectedId === base.id ? state.removeDocument(doc.id, revision) : false}
                       />
                     </div>
                   </div>

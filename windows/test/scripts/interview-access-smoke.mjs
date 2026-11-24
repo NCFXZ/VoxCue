@@ -7,16 +7,30 @@ import assert from 'node:assert/strict';
 
 async function checkWaveMotion(wave, reduced = false) {
   const frames = await wave.evaluate(async node => {
-    const sample = () => [...node.children].map(bar => getComputedStyle(bar).scale);
+    const sample = () => [...node.children].map(bar => {
+      const style = getComputedStyle(bar);
+      return {
+        width: Number.parseFloat(style.width), height: Number.parseFloat(style.height),
+        radius: Number.parseFloat(style.borderTopLeftRadius),
+        animation: style.animationName, delay: style.animationDelay,
+      };
+    });
     const first = sample();
     await new Promise(resolve => setTimeout(resolve, 100));
     return [first, sample()];
   });
-  assert.equal(frames[0].length, 3);
-  if (reduced) assert.deepEqual(frames, [Array(3).fill('none'), Array(3).fill('none')]);
-  else {
-    assert.notDeepEqual(frames[0], frames[1]);
-    assert.ok(new Set(frames[1]).size > 1, 'The bars move out of phase');
+  for (const frame of frames) {
+    assert.equal(frame.length, 5);
+    assert.ok(frame.every(({ width, height, radius }) => width > 0 && height + 0.01 >= width && radius >= width / 2),
+      'All five bars retain rounded caps as their heights change');
+  }
+  if (reduced) {
+    assert.ok(frames.flat().every(bar => bar.animation === 'none'));
+    assert.deepEqual(frames[0], frames[1]);
+  } else {
+    assert.ok(frames.flat().every(bar => bar.animation === 'input-wave-pulse'));
+    assert.notDeepEqual(frames[0].map(bar => bar.height), frames[1].map(bar => bar.height));
+    assert.ok(new Set(frames[1].map(bar => bar.delay)).size > 1, 'The bars move out of phase');
   }
 }
 

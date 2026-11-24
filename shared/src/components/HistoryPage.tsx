@@ -194,8 +194,7 @@ export function HistoryPage() {
                             {t(' 分')}{' '}
                             {Math.floor(Math.max(0, record.endedAt - record.startedAt) / 1000) % 60}{' '}
                             {t('秒 ·')}{' '}
-                            {record.answerCount}{' '}
-                            {t('个回答')}
+                            {record.answerCount === 1 ? t('1 个回答') : t('{0} 个回答', [record.answerCount])}
                           </p>
                         </div>
                         <ChevronDown size={15} />

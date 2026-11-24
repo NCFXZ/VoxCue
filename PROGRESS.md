@@ -7,6 +7,7 @@
 - 侧栏、聊天记录、知识库卡片和文档、待发送附件及两个面试输入框采用非线性动画。跨行补位时在行边缘淡出和淡入。知识库详情平滑调整高度，到达上限后文档区滚动，关闭时原地淡出。
 - 知识库按库使用独立索引目录和写进程。后台删除可跨重启恢复。由旧共享布局升级时先清理旧生成索引，再从保留的原件按库重建，沿用现有索引进度。现有分库索引继续使用。
 - 开始面试时按本场音源预检权限。Mac 在首次使用时请求系统授权，拒绝后可从弹窗打开对应系统设置。同步了设备区域间距、录音波形和确认按钮宽度。
+- Windows 接续修复了知识库归属记录写入中断、首次索引提交与删除并发、删除确认期间的文档或库变更，补齐知识库异常英文文案，校正英文面试记录的单数计数及「个人信息」的 16 × 16 px 图标。
 
 ## 实现与验证入口
 
@@ -19,6 +20,6 @@
 
 - Mac 1.3.5 同一组签名 DMG、ZIP、增量计划和清单已发布。源代码位于 GitHub 的 `v1.3.5`。公开更新索引包含 Mac 1.3.5，保留 Windows 1.3.3 和历史资产。 [GitHub 1.3.5](https://github.com/NCFXZ/VoxCue/releases/tag/v1.3.5) · [CNB 1.3.5](https://cnb.cool/voxcue-release/voxcue-release/-/releases/tag/v1.3.5)
 - [GitHub 1.3.3](https://github.com/NCFXZ/VoxCue/releases/tag/v1.3.3)和 [CNB 1.3.3](https://cnb.cool/voxcue-release/voxcue-release/-/releases/tag/v1.3.3)保留两端正式原件作为升级基线。
-- 在 Windows 本机按交接同步 1.3.5，并完成原生、DPI、升级、签名和发布验收，再追加 Windows 发行资产和 CNB 索引。Microsoft Store 2.3.3.0 已提交认证（Submission 12，`1152921505702489003`）。
+- Windows 1.3.5 配置已在本机同步。已保留 Windows 1.3.3 EXE、blockmap、签名清单及 Store 包。Sandbox 升级入口为 `store-sandbox-smoke.mjs --nsis-upgrade-1.3.3` 和 `--appx-upgrade-1.3.3`。接续工作包括剩余功能、稳定性与安装回归，以及 GitHub／CNB 1.3.5 和 Microsoft Store 2.3.5.0 发布。Partner Center 显示上一版 Store 2.3.3.0 的 Submission 12 已上架。
 - [官网欢迎公告配置](shared/docs/ANNOUNCEMENTS.md)待在另一台电脑的 EdgeOne Pages 项目 `voxcue-website` 发布并核对 `/app/announcements.json`。
 - 固定轻量语音模型可能误识别极短语气词。云端 0.6.1 跨设备并发新增截图引用与删除的既有竞态详见 [历史交接](shared/docs/WINDOWS_1.3.0_HANDOFF.md)。

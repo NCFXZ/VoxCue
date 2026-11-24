@@ -34,9 +34,9 @@ interface KnowledgeState {
   open(id: string | null): Promise<void>;
   create(name: string): Promise<boolean>;
   rename(name: string): Promise<boolean>;
-  removeBase(): Promise<boolean>;
+  removeBase(revision: string | null): Promise<boolean>;
   importFiles(files: File[]): Promise<void>;
-  removeDocument(id: string): Promise<boolean>;
+  removeDocument(id: string, revision: string | null): Promise<boolean>;
 }
 const message = (error: unknown) => (error instanceof Error ? error.message : '操作失败，请重试。');
 let documentRequest = 0;
@@ -173,15 +173,19 @@ export const useKnowledge = create<KnowledgeState>((set, get) => ({
       set({ busy: false });
     }
   },
-  async removeBase() {
+  async removeBase(revision) {
     if (get().busy) return false;
     const base = get().bases.find(item => item.id === get().selectedId);
     if (!base) return false;
     const id = base.id;
+    if (documentRevision(base) !== revision) {
+      set({ error: '资料已更改，请重新确认删除。', errorBaseId: id });
+      return false;
+    }
     const selection = selectionRevision;
     set({ error: null, errorBaseId: null });
     try {
-      const result = await queueKnowledgeRemoval({ baseId: id, revision: documentRevision(base) });
+      const result = await queueKnowledgeRemoval({ baseId: id, revision });
       if (!result) return false;
       set({ removals: listKnowledgeRemovals() });
       if (get().selectedId === id && selection === selectionRevision) await get().open(null);
@@ -225,15 +229,19 @@ export const useKnowledge = create<KnowledgeState>((set, get) => ({
       set({ busy: false });
     }
   },
-  async removeDocument(id) {
+  async removeDocument(id, revision) {
     if (get().busy) return false;
     const baseId = get().selectedId;
     const doc = get().documents.find(item => item.id === id && item.baseId === baseId);
     if (!doc) return false;
+    if (documentRevision(doc) !== revision) {
+      set({ error: '资料已更改，请重新确认删除。', errorBaseId: baseId });
+      return false;
+    }
     const selection = selectionRevision;
     set({ error: null, errorBaseId: null });
     try {
-      if (!await queueKnowledgeRemoval({ baseId: doc.baseId, documentId: id, revision: documentRevision(doc) }))
+      if (!await queueKnowledgeRemoval({ baseId: doc.baseId, documentId: id, revision }))
         return false;
       set({ removals: listKnowledgeRemovals() });
       void get().resumeRemovals();

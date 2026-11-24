@@ -30,6 +30,7 @@ export class KnowledgeHost implements KnowledgePort {
   private closing?: Promise<void>;
   private readonly workers = new Map<string, LibraryWorker>();
   private readonly batches = new Map<string, string>();
+  private readonly indexWrites = new Map<Promise<KnowledgeDocument>, Pick<DocumentInput, 'documentId' | 'baseId'>>();
   private readonly removals = new Map<string, Promise<null>>();
 
   constructor(private readonly root: string, private readonly modelPath: string,
@@ -154,7 +155,13 @@ export class KnowledgeHost implements KnowledgePort {
     } finally { this.batches.delete(id); }
   }
 
-  async indexDocument(input: DocumentInput, signal: AbortSignal) {
+  indexDocument(input: DocumentInput, signal: AbortSignal) {
+    const work = this.writeIndex(input, signal);
+    this.indexWrites.set(work, { documentId: input.documentId, baseId: input.baseId });
+    return work.finally(() => { this.indexWrites.delete(work); });
+  }
+
+  private async writeIndex(input: DocumentInput, signal: AbortSignal) {
     const catalogs = await this.catalogs(signal);
     for (const [id, catalog] of catalogs) {
       // Cloud restore can move an existing document ID into a different library.
@@ -169,9 +176,15 @@ export class KnowledgeHost implements KnowledgePort {
   updateDocument(input: DocumentInput, signal: AbortSignal) { return this.indexDocument(input, signal); }
 
   private async mutateDocument(op: 'invalidateDocument' | 'removeDocument', documentId: string, signal: AbortSignal): Promise<null> {
+    const libraries = new Set<string>();
+    // A cancelled writer can already be publishing its first catalog. Route
+    // the mutation through its own worker even when disk has no entry yet.
+    for (const input of this.indexWrites.values())
+      if (input.documentId === documentId) libraries.add(input.baseId);
     for (const [id, catalog] of await this.catalogs(signal))
-      if (Object.hasOwn(catalog.documents, documentId))
-        await this.run(id, signal, (host, scope) => host[op](documentId, scope));
+      if (Object.hasOwn(catalog.documents, documentId)) libraries.add(id);
+    for (const id of libraries)
+      await this.run(id, signal, (host, scope) => host[op](documentId, scope));
     return null;
   }
   invalidateDocument(documentId: string, signal: AbortSignal) { return this.mutateDocument('invalidateDocument', documentId, signal); }

@@ -1,9 +1,15 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import { KnowledgeHost as ProfileKnowledgeHost } from '../../electron/backend/knowledge/host';
+import { libraryKey } from '../../electron/backend/knowledge/libraryLayout';
 import { LibraryKnowledgeHost as KnowledgeHost } from '../../electron/backend/knowledge/workerHost';
 import { KnowledgeError } from '../../../shared/electron/backend/knowledge/errors';
+import { MODEL_REVISION } from '../../electron/backend/knowledge/types';
 import type { PrepareKnowledgeDatabase } from '../../electron/backend/knowledge/types';
 import { KnowledgeCoordinator } from '../../electron/application/knowledge';
+import { temporaryDirectory } from '../temp';
 
 const native = vi.hoisted(() => ({ fork: vi.fn() }));
 vi.mock('electron', () => ({ utilityProcess: { fork: native.fork } }));
@@ -392,6 +398,54 @@ it.each([false, true])('deletion resumes after retiring an unresponsive cancelle
   } finally {
     vi.useRealTimers();
   }
+});
+
+it.each(['remove', 'invalidate'] as const)('routes %s to an index writer whose first catalog is still publishing', async op => {
+  const root = await temporaryDirectory('index-publication');
+  const libraries = path.join(root, 'libraries');
+  const document = { documentId: 'one', baseId: 'target', name: 'synthetic.md' };
+  const file = path.join(libraries, libraryKey(document.baseId), 'catalog.json');
+  await mkdir(libraries);
+  await writeFile(path.join(libraries, 'layout.json'), '{"version":1}');
+  const catalog = { schemaVersion: 1, modelVersion: MODEL_REVISION, documents: { one: { document } } };
+  const { child } = setup();
+  const host = new ProfileKnowledgeHost(root, '/synthetic/models');
+  const coordinator = new KnowledgeCoordinator(host, '/synthetic/models', vi.fn());
+  const indexing = Promise.withResolvers<string>(), published = Promise.withResolvers<void>();
+  child.postMessage.mockImplementation(message => {
+    const reply = (value: unknown) => child.emit('message', { id: message.id, value });
+    if (message.op === 'index') indexing.resolve(message.id);
+    else if (message.op === op) {
+      void published.promise.then(() => writeFile(file, JSON.stringify(op === 'remove'
+        ? { ...catalog, documents: {} } : { ...catalog, blocked: [document.documentId] })))
+        .then(() => reply(null), () => child.emit('message', { id: message.id, error: 'Synthetic write failed' }));
+    } else if (message.init) queueMicrotask(() => reply(null));
+  });
+  try {
+    const imported = expect(coordinator.call({
+      ...document, op: 'import', requestId: 'import', bytes: new Uint8Array([1]),
+    })).rejects.toMatchObject({ code: 'cancelled' });
+    const indexId = await indexing.promise;
+    const readCatalogs = host['catalogs'].bind(host);
+    const checked = Promise.withResolvers<number>();
+    vi.spyOn(host as unknown as { catalogs: typeof readCatalogs }, 'catalogs').mockImplementationOnce(async signal => {
+      const beforePublication = await readCatalogs(signal);
+      checked.resolve(beforePublication.size);
+      return beforePublication;
+    });
+
+    const mutation = coordinator.call({ op, requestId: 'change', documentId: document.documentId });
+    expect(await checked.promise).toBe(0);
+    expect(child.postMessage).toHaveBeenCalledWith({ cancel: indexId });
+    await writeFile(file, JSON.stringify(catalog));
+    published.resolve();
+    child.emit('message', { id: indexId, value: document });
+
+    await imported;
+    await expect(mutation).resolves.toBeNull();
+    const current = JSON.parse(await readFile(file, 'utf8'));
+    expect(op === 'remove' ? current.documents.one : current.blocked).toEqual(op === 'remove' ? undefined : ['one']);
+  } finally { await host.close(); }
 });
 
 it('serves committed reads while a writer is still indexing and retires the extra reader afterwards', async () => {

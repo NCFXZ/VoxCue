@@ -82,6 +82,11 @@ export function sourceGraph(root) {
     baseUrl: root,
     paths: { '@/*': ['shared/src/*'] },
   };
+  const resolutionCache = ts.createModuleResolutionCache(
+    root,
+    (name) => ts.sys.useCaseSensitiveFileNames ? name : name.toLowerCase(),
+    options,
+  );
   const graph = new Map();
   function visit(directory) {
     if (!fs.existsSync(directory)) return;
@@ -98,6 +103,7 @@ export function sourceGraph(root) {
               absolute,
               options,
               ts.sys,
+              resolutionCache,
             ).resolvedModule;
             const assetTarget = edge.target.replace(/\?inline$/, '');
             const asset = path.resolve(path.dirname(absolute), assetTarget);

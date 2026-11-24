@@ -34,6 +34,7 @@ const appxBaselines = new Map([
   ['--appx-upgrade-1.2.2', ['1.2.2', 'b97c3b05c5550824c952d1a77aff02e5b110082e0b24e324c3e371926221a2e8', 'store']],
   ['--appx-upgrade-1.3.0', ['1.3.0', '4ff42cba5792d3460e9369614002361661f9410419992b9dffcb5d1ddfea5792', 'store']],
   ['--appx-upgrade-1.3.2', ['1.3.2', '04b68c2d9d57eb10599be86f824be72e35deee58ff340b0b80e9e550488b7f9b', 'store']],
+  ['--appx-upgrade-1.3.3', ['1.3.3', '1231283f74d14bd10ccf2426de73c5408884239c2459bd40b30ae712d906f48e', 'store']],
 ]);
 const appxUpgrade = appxBaselines.has(argument);
 // Published, immutable originals used before installing the current package.
@@ -44,6 +45,7 @@ const previousVersions = new Map([
   ['--nsis-upgrade-1.1.1', ['1.1.1', 'cb84c1f7b22f5e613a1401dc38e201817d78dac0b214721b8fbb7d6f09998bfd']],
   ['--nsis-upgrade-1.3.0', ['1.3.0', '4c1666dcc3488d58df75f69dc4a9686851564194b7dbe1271e6921c66fb1e36d', 'installer']],
   ['--nsis-upgrade-1.3.2', ['1.3.2', '7dd66772bc6af35eedae829a15155f86faa55459499cb4db477723629b4389ad', 'installer']],
+  ['--nsis-upgrade-1.3.3', ['1.3.3', 'b8503f4e89bdf953480c9eb80f7b86e9a48dac970ec88922013a525e36db1874', 'installer']],
 ]);
 const nsisTask =
   argument === '--nsis-current' ? 'nsis-current'
@@ -79,7 +81,7 @@ const artifact = copilotVault
       : path.join(platformRoot, 'release/store', `VoxCue-Store-${version}-x64.appx`);
 const [previousVersion, previousDigest, previousDirectory = previousVersion] =
   appxBaselines.get(argument) ?? previousVersions.get(argument) ?? [];
-const checkCachedOffer = Boolean(nsisTask) && ['1.2.2', '1.2.3', '1.3.0'].includes(previousVersion);
+const checkCachedOffer = Boolean(nsisTask) && ['1.2.2', '1.2.3', '1.3.0', '1.3.3'].includes(previousVersion);
 const checkRagUpgrade = checkCachedOffer || previousVersion === '1.2.0';
 let previousArtifact;
 if (previousVersion) {
@@ -405,12 +407,44 @@ function Check-ApiKeyPaste($directory) {
   $result.apiKeyPaste = $true
 }
 function Install-UpgradeRag($profileMarker) {
-  if ($config.ragDirectory -cnotmatch '^rag-1\.0\.0-[a-f0-9]{64}$' -or $config.previous.version -notin @('1.2.0','1.2.2','1.2.3','1.3.0','1.3.2')) { throw 'Unexpected upgrade component' }
+  if ($config.ragDirectory -cnotmatch '^rag-1\.0\.0-[a-f0-9]{64}$' -or $config.previous.version -notin @('1.2.0','1.2.2','1.2.3','1.3.0','1.3.2','1.3.3')) { throw 'Unexpected upgrade component' }
   $cache = Join-Path ([IO.Path]::GetDirectoryName($profileMarker)) 'component-cache'
   Assert-GuestProfilePath $cache
   if (Test-Path -LiteralPath $cache) { throw 'Upgrade fixture requires a fresh component cache' }
   $null = New-Item -ItemType Directory -Path $cache -Force
   Copy-Item -LiteralPath (Join-Path 'C:\VoxCueStoreInput' $config.ragDirectory) -Destination $cache -Recurse
+}
+function Test-IndexRebuild($targetVersion) {
+  $sourceVersion = [version]$config.previous.version
+  $target = [version]$targetVersion
+  return ($sourceVersion -lt [version]'1.3.0' -and $target -ge [version]'1.3.0') -or
+    ($sourceVersion -lt [version]'1.3.5' -and $target -ge [version]'1.3.5')
+}
+function Assert-UpgradeIndexLayout($profileMarker, $installedVersion) {
+  if ($config.previous.version -cne '1.3.3' -or [version]$config.version -lt [version]'1.3.5') { return }
+  $root = [IO.Path]::GetDirectoryName($profileMarker)
+  $account = Join-Path (Join-Path $root 'account-profiles') '${createHash('sha256').update('local').digest('hex')}'
+  $knowledge = Join-Path $account 'knowledge-v1'
+  $legacyCatalog = Join-Path $knowledge 'catalog.json'
+  $layout = Join-Path $knowledge 'libraries\layout.json'
+  $library = Join-Path (Join-Path $knowledge 'libraries') '${createHash('sha256').update('sandbox-persistence-base').digest('hex').slice(0, 24)}'
+  $ownerFile = Join-Path $library 'owner.json'
+  $libraryCatalog = Join-Path $library 'catalog.json'
+  foreach ($file in @($legacyCatalog, $layout, $ownerFile, $libraryCatalog)) { Assert-GuestProfilePath $file }
+  if ($installedVersion -ceq $config.previous.version) {
+    if (-not (Test-Path -LiteralPath $legacyCatalog -PathType Leaf) -or (Test-Path -LiteralPath $layout)) {
+      throw 'The original installer did not create the shared knowledge index'
+    }
+    return
+  }
+  if (Test-Path -LiteralPath $legacyCatalog) { throw 'Upgrade left the old shared index catalog' }
+  $layoutState = Get-Content -LiteralPath $layout -Encoding UTF8 -Raw | ConvertFrom-Json
+  $owner = Get-Content -LiteralPath $ownerFile -Encoding UTF8 -Raw | ConvertFrom-Json
+  if ($layoutState.version -ne 1 -or $layoutState.PSObject.Properties.Name -contains 'legacy' -or
+      $owner.version -ne 1 -or $owner.baseId -cne 'sandbox-persistence-base' -or
+      -not (Test-Path -LiteralPath $libraryCatalog -PathType Leaf)) {
+    throw 'Upgrade did not finish migration to the owned per-library index'
+  }
 }
 function Assert-GuestProfilePath($file) {
   $current = [IO.Path]::GetFullPath($file)
@@ -650,8 +684,7 @@ try {
         if ($config.ragDirectory) {
           $options.checkRag = $true
           $options.ragRevision = $result.ragRevision
-          $options.rebuildIndex = $phase -ceq 'verify' -and $phases.Count -eq 1 -and
-            [version]$config.previous.version -lt [version]'1.3.0' -and [version]$expectedVersion -ge [version]'1.3.0'
+          $options.rebuildIndex = $phase -ceq 'verify' -and $phases.Count -eq 1 -and (Test-IndexRebuild $expectedVersion)
         }
         [IO.File]::WriteAllText($runtimeConfig, ($options | ConvertTo-Json -Depth 10 -Compress), (New-Object Text.UTF8Encoding $false))
         $inspection = New-Object Diagnostics.Process
@@ -690,6 +723,7 @@ try {
         if ($config.ragDirectory) {
           if ($runtime.ragRevision -cnotmatch '^[a-f0-9]{64}$' -or
               ($phase -ceq 'verify' -and (($runtime.ragRevision -cne $result.ragRevision) -ne $options.rebuildIndex))) { throw 'Unexpected RAG revision across upgrade or restart' }
+          Assert-UpgradeIndexLayout $profileMarker $expectedVersion
           $result.ragRevision = $runtime.ragRevision
         }
         # Never kill a product process and call that a successful flush/upgrade.
@@ -940,8 +974,7 @@ public static class PackageProcess {
         if ($profileMarker -ine $profileMarkers[1] -or (Get-FileHash -LiteralPath $profileMarker -Algorithm SHA256).Hash -cne $markerHash) { throw 'Store upgrade replaced the original LocalCache preference' }
         $options.bindings = $seedBindings
         $options.ragRevision = $result.ragRevision
-        $options.rebuildIndex = $pass -eq 1 -and
-          [version]$config.previous.version -lt [version]'1.3.0' -and [version]$item.version -ge [version]'1.3.0'
+        $options.rebuildIndex = $pass -eq 1 -and (Test-IndexRebuild $item.version)
       }
     }
     $runtimeConfig = Join-Path $work 'renderer-config.json'
@@ -970,6 +1003,7 @@ public static class PackageProcess {
     if ($runtime.persistence -isnot [bool] -or -not $runtime.persistence) { throw 'Packaged renderer persistence regression failed' }
     if ($config.previous) {
       if ($profileMarker -ine $profileMarkers[1] -or $runtime.phase -cne $options.phase -or $runtime.ragRevision -cnotmatch '^[a-f0-9]{64}$') { throw 'Store upgrade profile or RAG evidence missing' }
+      Assert-UpgradeIndexLayout $profileMarker $item.version
       if ($pass -eq 0) {
         $seedBindings = $runtime.bindings
         $markerHash = (Get-FileHash -LiteralPath $profileMarker -Algorithm SHA256).Hash

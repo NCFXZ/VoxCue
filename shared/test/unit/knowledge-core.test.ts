@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
 import { existsSync } from 'node:fs';
-import { lstat, readFile, readdir, rename, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises';
 import fs from 'node:fs/promises';
 import { syncBuiltinESMExports } from 'node:module';
 import { temporaryDirectory } from '../temp';
@@ -72,6 +72,31 @@ async function markOldDocuments(root: string, ids: string[], legacyFormat = true
 }
 
 describe('LanceDB 正式知识核心（真实 DB、合成测试向量）', () => {
+  it('recovers incomplete ownership writes and preserves unrecognized temporary contents', async () => {
+    const root = await directory(), baseId = 'pending-owner', key = libraryKey(baseId);
+    const temporary = 'owner.json.11111111-1111-4111-8111-111111111111.tmp';
+    const stage = path.join(root, 'new-libraries', key), job = path.join(root, 'removed-libraries', key);
+    const active = path.join(root, 'libraries', key);
+    await migrateLibraryLayout(root);
+    for (const folder of [stage, job]) {
+      await mkdir(folder, { recursive: true });
+      await writeFile(path.join(folder, temporary), '{"version":');
+    }
+
+    const unrelated = path.join(stage, 'keep.txt');
+    await writeFile(unrelated, 'Preserve unrecognized contents.');
+    await expect(ensurePublishedLibrary(root, baseId)).rejects.toMatchObject({ code: 'integrity' });
+    expect(await readFile(unrelated, 'utf8')).toBe('Preserve unrecognized contents.');
+    expect(await readFile(path.join(stage, temporary), 'utf8')).toBe('{"version":');
+    await fs.rm(unrelated);
+
+    await ensurePublishedLibrary(root, baseId);
+    expect(await readdir(active)).toEqual(['owner.json']);
+    await removeLibraryFolder(root, baseId, signal());
+    await expect(lstat(active)).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(lstat(job)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
   it('replays moved-source document cleanup against an inactive mixed-version catalog', async () => {
     const userData = await directory(), root = path.join(profileDirectory(userData, 'local'), 'knowledge-v1');
     const prepareDatabase: PrepareKnowledgeDatabase | undefined = process.platform === 'win32'
