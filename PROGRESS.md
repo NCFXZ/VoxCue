@@ -2,19 +2,19 @@
 
 ## 当前版本与范围
 
-**2026-11-24 · Windows 1.3.3 已发布，Mac 1.3.3 已发布到 GitHub，CNB 待同步。** 版本唯一来源为 `shared/package.json`，根和两个平台的配置均为 `1.3.3`。Windows 商店身份版本为 `2.3.3.0`，已提交认证。
+**2026-11-24 · Windows 与 macOS 1.3.3 已发布到 GitHub 和 CNB。** 版本唯一来源为 `shared/package.json`，根和两个平台的配置均为 `1.3.3`。Windows 商店身份版本为 `2.3.3.0`，已提交认证。
 
-本轮清理 Mac 工作区，执行源码、安全、稳定性、英文界面和五档缩放回归，并在隔离 guest 验证正式安装、覆盖升级、麦克风和截图授权。发行时将源码推送到 VoxCue 主仓库，将同一组 Mac 1.3.3 正式资产同步到 GitHub 和 CNB。
+本轮清理 Mac 工作区，执行源码、安全、稳定性、英文界面和五档缩放回归，并在隔离 guest 验证正式安装、覆盖升级、麦克风和截图授权。源码已推送到 VoxCue 主仓库，同一组 Mac 1.3.3 正式资产已同步到 GitHub 和 CNB。
 
 本轮按 Mac 交接文档验证 1.3.3 已实现的改动，并在 `macos/` 使用固定签名的本地试用入口。Mac 依赖使用本平台锁定版本，复用 1.3.2 已签名的 Qwen 运行时。Mac 登录和退出登录共用 SF Symbols 适配，使用配套的 `iphone.and.arrow.right.inward` 和 `iphone.and.arrow.right.outward`，在 macOS 14 上构建时回退到配套方框箭头。新对话在 Mac 使用 `square.and.pencil`，共享默认适配使用方框铅笔，更新完成通知使用无外框项目符号列表。RAG 只用本轮合成资料验收功能，沿用已调优模型、阈值和检索参数。
 
-Mac 试用版使用 24 pt 生成 SF Symbols，按共享界面的各控件尺寸显示。账号操作及更新日志按钮为 16 px，新对话为 18 px。手机遥控页「自动回答」开关的圆点大小与 Windows 一致，均为 11 × 11 px。
+Mac 使用 24 pt 生成 SF Symbols，按共享界面的各控件尺寸显示。账号操作及更新日志按钮为 16 px，新对话为 18 px。手机遥控页「自动回答」开关的圆点大小与 Windows 一致，均为 11 × 11 px。
 
 Mac 的「个人信息」图标为 16 × 16 px。面试浮窗、登录及设置预览和播放器「选择录音」在两端共用 18 × 18 px 手绘波形。实际录音时波形随电平变化。
 
 Mac 1.3.3 的主程序与音频助手签名包含 Hardened Runtime 的 Audio Input 授权，验包直接检查签名中的权限值。面试设置可独立检查所选麦克风，拒绝后提供系统设置入口。麦克风和截图分别在隔离 guest 验证首次系统弹窗、拒绝后的权限列表与重新授权；截图沿用独立的屏幕录制授权入口。
 
-Mac 试用包已包含网络增量。下载器复用当前版本的本地已验证 ZIP，通过同源 Range 补齐新版 ZIP。差分不可用时回退全量，完成归档仍由原 Sparkle 安装链验签。增量打包、镜像与本机复验入口见 [Mac 更新设计](macos/docs/UPDATES.md#网络增量与全量兜底)。
+Mac 1.3.3 包含网络增量。下载器复用当前版本的本地已验证 ZIP，通过同源 Range 补齐新版 ZIP。差分不可用时回退全量，完成归档仍由原 Sparkle 安装链验签。增量打包、镜像与本机复验入口见 [Mac 更新设计](macos/docs/UPDATES.md#网络增量与全量兜底)。
 
 ## 实现与文档入口
 
@@ -35,9 +35,9 @@ Windows 发行验证已完成。复验入口包括五档缩放、`store-sandbox-
 ## 发行状态与接续待办
 
 - 源码已推送 GitHub `main`；[GitHub v1.3.3](https://github.com/NCFXZ/VoxCue/releases/tag/v1.3.3) 已正式发布 Windows 安装器、blockmap、签名清单以及 Mac DMG、ZIP、增量计划和签名清单。Mac 资产已完成匿名下载核验。
-- [CNB v1.3.3](https://cnb.cool/voxcue-release/voxcue-release/-/releases/tag/v1.3.3) 已同步三项原件；匿名入口完成完整摘要、清单／blockmap 一致性和 Range 字节核对后，已发布 `main/releases.json`。组件与历史条目保留；本次临时流水线已移除。
+- [CNB v1.3.3](https://cnb.cool/voxcue-release/voxcue-release/-/releases/tag/v1.3.3) 已同步 Windows 和 Mac 的发行原件，并更新双语发行说明。匿名下载核验通过后，已将 Mac 更新资产合并至 `main/releases.json`。Windows 资产、组件及历史条目已保留，临时镜像流水线已移除。
 - Microsoft Store `2.3.3.0` 已上传并提交 Submission 12（`1152921505702489003`），当前为认证中／预处理，尚未表示新版正式上架。中英文各五张丰富截图、实际支持的 API 服务描述及用户确定的五条更新说明均已保存。
-- Mac 归档增量与全量回退专项使用 1.3.2 官方 ZIP；正式安装和覆盖升级使用隔离 guest。CNB 需要登录后提交 Mac 镜像配置，核对同一组资产的公开直链和摘要，再将 Mac 资产合并进 `main/releases.json`。
+- Mac 归档增量与全量回退专项使用 1.3.2 官方 ZIP，正式安装和覆盖升级使用隔离 guest。客户端解析器已核对 CNB 匿名索引，两端均能发现 1.3.3。Mac 增量已通过公开 CNB Range 下载重组并核对签名归档。
 - Mac 定向验证入口为共享公告、设置定位、独立额度、面试胶囊及 RAG 专项。Mac 更新驱动夹具已覆盖地区探测与发行检查，原有离线缓存和节流断言保留。
 - 待在 Windows 本机将「个人信息」图标调整为 16 × 16 px，并复验共享的 18 × 18 px 录音波形、动画与紧凑账号表单。
 - 官网欢迎公告配置已准备。由另一台电脑在 EdgeOne Pages 项目 `voxcue-website` 发布，随后核对公开地址 `/app/announcements.json`。
