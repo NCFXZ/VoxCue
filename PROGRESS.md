@@ -2,7 +2,7 @@
 
 ## 当前版本与范围
 
-**2026-11-24 · Windows 1.3.3 已发布，Mac 接续验证 1.3.3。** 版本唯一来源为 `shared/package.json`，根和两个平台的配置均为 `1.3.3`。Windows 商店身份版本为 `2.3.3.0`，已提交认证。
+**2026-11-24 · Windows 1.3.3 已发布，Mac 1.3.3 已发布到 GitHub，CNB 待同步。** 版本唯一来源为 `shared/package.json`，根和两个平台的配置均为 `1.3.3`。Windows 商店身份版本为 `2.3.3.0`，已提交认证。
 
 本轮清理 Mac 工作区，执行源码、安全、稳定性、英文界面和五档缩放回归，并在隔离 guest 验证正式安装、覆盖升级、麦克风和截图授权。发行时将源码推送到 VoxCue 主仓库，将同一组 Mac 1.3.3 正式资产同步到 GitHub 和 CNB。
 
@@ -34,10 +34,10 @@ Windows 发行验证已完成。复验入口包括五档缩放、`store-sandbox-
 
 ## 发行状态与接续待办
 
-- 源码已推送 GitHub `main`；[GitHub v1.3.3](https://github.com/NCFXZ/VoxCue/releases/tag/v1.3.3) 已正式发布 Windows 安装器、blockmap 和签名清单。
+- 源码已推送 GitHub `main`；[GitHub v1.3.3](https://github.com/NCFXZ/VoxCue/releases/tag/v1.3.3) 已正式发布 Windows 安装器、blockmap、签名清单以及 Mac DMG、ZIP、增量计划和签名清单。Mac 资产已完成匿名下载核验。
 - [CNB v1.3.3](https://cnb.cool/voxcue-release/voxcue-release/-/releases/tag/v1.3.3) 已同步三项原件；匿名入口完成完整摘要、清单／blockmap 一致性和 Range 字节核对后，已发布 `main/releases.json`。组件与历史条目保留；本次临时流水线已移除。
 - Microsoft Store `2.3.3.0` 已上传并提交 Submission 12（`1152921505702489003`），当前为认证中／预处理，尚未表示新版正式上架。中英文各五张丰富截图、实际支持的 API 服务描述及用户确定的五条更新说明均已保存。
-- Mac 接续验收入口见逐项交接。实际归档增量与全量回退的本机专项使用 1.3.2 官方 ZIP；正式安装和覆盖升级使用隔离 guest。追加双源资产时保留 Windows 文件和已发布标签。
+- Mac 归档增量与全量回退专项使用 1.3.2 官方 ZIP；正式安装和覆盖升级使用隔离 guest。CNB 需要登录后提交 Mac 镜像配置，核对同一组资产的公开直链和摘要，再将 Mac 资产合并进 `main/releases.json`。
 - Mac 定向验证入口为共享公告、设置定位、独立额度、面试胶囊及 RAG 专项。Mac 更新驱动夹具已覆盖地区探测与发行检查，原有离线缓存和节流断言保留。
 - 待在 Windows 本机将「个人信息」图标调整为 16 × 16 px，并复验共享的 18 × 18 px 录音波形、动画与紧凑账号表单。
 - 官网欢迎公告配置已准备。由另一台电脑在 EdgeOne Pages 项目 `voxcue-website` 发布，随后核对公开地址 `/app/announcements.json`。
@@ -45,7 +45,7 @@ Windows 发行验证已完成。复验入口包括五档缩放、`store-sandbox-
 
 ## 已发基线与保留边界
 
-- Windows 当前已发基线为 `1.3.3`；Mac 当前已发基线仍为 [1.3.2](https://github.com/NCFXZ/VoxCue/releases/tag/v1.3.2)，待本机完成 1.3.3 交接。Windows 1.3.2 原始发行源码为 `9a553ab7140b93704e5566c999e1bf0e27bc10a7`；本地正式 1.3.2 安装器、blockmap、清单和 Store 原件保留用于升级验证，不以新生成文件冒充旧包。
+- Windows 和 Mac 当前已发基线为 `1.3.3`。Windows 1.3.2 原始发行源码为 `9a553ab7140b93704e5566c999e1bf0e27bc10a7`；本地正式 1.3.2 安装器、blockmap、清单和 Store 原件保留用于升级验证，不以新生成文件冒充旧包。
 - Microsoft Store 当前正式可用版本仍为 `2.3.2.0`（Submission 11，`1152921505702467958`）；`2.3.3.0` 已进入认证流程。[商店入口](https://partner.microsoft.com/en-us/dashboard/products/9PBBVWZXMBPW/overview)
 - Mac 1.3.2 的固定签名、冻结 v1／v11 凭据助手、现用模型／依赖及正式恢复原件保留；Mac 1.3.3 原生、签名、隔离 guest 和增量更新依照交接逐项在本机完成。后续追加 Mac 资产保留已发 Windows 文件，不移动既有发行标签。
 - 旧客户端的 `NCFXZ/VoxCue-releases` 下载兼容保持；新源码与发行使用 `NCFXZ/VoxCue`。源码为 AGPL-3.0-only，组件许可证见 [第三方声明](THIRD_PARTY_NOTICES.md)。
