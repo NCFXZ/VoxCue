@@ -4,6 +4,8 @@
 
 版本唯一来源为 `shared/package.json` 的 `1.3.3`。Windows Store 身份版本为 `2.3.3.0`；Mac 不提交微软商店。保留既有固定 Mac 签名、更新签名、凭据助手和恢复原件，不生成新身份，不改依赖或模型版本。
 
+Windows 1.3.3 已发布到 [GitHub](https://github.com/NCFXZ/VoxCue/releases/tag/v1.3.3) 和 [CNB](https://cnb.cool/voxcue-release/voxcue-release/-/releases/tag/v1.3.3)，CNB 匿名客户端索引已更新。微软商店 2.3.3.0 已提交 Submission 12，当前认证中。Mac 接续拉取 `main`，完成下列图标、原生差分、签名及本机验收后追加 Mac 资产；保留已发布的 Windows 文件和 `v1.3.3` 标签。
+
 ## 一、AI 服务、准备聊天与资料提案
 
 | 编号 | 1.3.3 改动 | Mac 逐项操作与预期 |
