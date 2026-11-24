@@ -5,6 +5,7 @@ import * as lance from '@lancedb/lancedb';
 import { atomicFile } from '../atomicFile';
 import { KnowledgeError } from './errors';
 import type { KnowledgeDocument } from '../../contracts/knowledge';
+import { catalogFile, ownedTable, revisionFile, uuid } from './libraryLayout';
 
 export function indexText(table: lance.Table) {
   return table.createIndex('text', {
@@ -32,12 +33,6 @@ export interface Catalog {
 }
 
 const journalName = '.library-erasure.json';
-const uuid = '[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}';
-const catalogFile = new RegExp(
-  '^(?:catalog\\.json|catalog-backup-' + uuid + '\\.json|catalog-' + uuid + '\\.tmp)$',
-);
-const ownedTable = /^chunks_[a-f0-9]+$/;
-const revisionFile = /^rev-[\w-]+\.json$/;
 const invalid = () => new KnowledgeError('integrity', '知识库恢复文件归属或版本异常，已中止清理。');
 const unowned = () =>
   new KnowledgeError('integrity', '旧索引正文的所属知识库无法确认，已保留原件，整库清理尚未完成。');
@@ -105,9 +100,12 @@ export async function* eachRecoveryCatalog(directory: string, progressed?: () =>
     yield [file, catalog] as const;
   }
 }
-async function recoveryCatalogs(directory: string, progressed?: () => void) {
+async function recoveryCatalogs(directory: string, progressed?: () => void, signal?: AbortSignal) {
   const entries = new Map<string, Catalog>();
-  for await (const [file, catalog] of eachRecoveryCatalog(directory, progressed)) entries.set(file, catalog);
+  for await (const [file, catalog] of eachRecoveryCatalog(directory, progressed)) {
+    signal?.throwIfAborted();
+    entries.set(file, catalog);
+  }
   return entries;
 }
 async function removeIfPresent(file: string) {
@@ -309,36 +307,37 @@ async function targetRevisions(
 }
 const lastRebuild = (name: string) => 'voxcue-rebuilt-' + name;
 async function historyContains(table: lance.Table, baseId: string, signal: AbortSignal, progressed?: () => void) {
+  const targetOrUnowned = "baseId = '" + baseId + "' OR baseId IS NULL";
   for (const { version } of await table.listVersions()) {
     signal.throwIfAborted();
     await table.checkout(version);
-    if (await table.countRows('baseId IS NULL')) throw unowned();
-    const rows = await table.countRows("baseId = '" + baseId + "'");
+    const rows = await table.countRows(targetOrUnowned);
     progressed?.();
-    if (rows) return true;
+    if (rows) {
+      if (await table.countRows('baseId IS NULL')) throw unowned();
+      return true;
+    }
   }
   return false;
 }
 async function rewriteHistory(
   db: lance.Connection,
   source: lance.Table,
-  receipt: Receipt,
-  target: TableVersionMap,
+  target: string,
   catalogs: Catalog[],
+  retain: string,
   signal: AbortSignal,
   progressed?: () => void,
 ) {
   const original = (await source.listVersions()).sort((a, b) => a.version - b.version);
   const sourceTags = await (await source.tags()).list();
-  const marker = lastRebuild(target.from);
+  const marker = lastRebuild(source.name);
   const through = sourceTags[marker]?.version ?? 0;
   const retained = new Set(Object.values(sourceTags).map((t) => t.version));
   for (const catalog of catalogs)
-    if (catalog.tableName === target.from) retained.add(catalog.tableVersion!);
-  const dest = await db.createEmptyTable(
-    replacement(target.from, receipt.id),
-    await source.schema(),
-  );
+    if (catalog.tableName === source.name) retained.add(catalog.tableVersion!);
+  const versions: Record<string, number> = {};
+  const dest = await db.createEmptyTable(target, await source.schema());
   try {
     const tags = await dest.tags();
     for (const { version } of original) {
@@ -352,7 +351,6 @@ async function rewriteHistory(
         throw invalid();
       // Only filtered Arrow batches enter the replacement, including its own historical fragments.
       if (await source.countRows('baseId IS NULL')) throw unowned();
-      const retain = "baseId != '" + receipt.baseId + "'";
       let rows = 0;
       for await (const batch of source.query().where(retain)) {
         signal.throwIfAborted();
@@ -370,11 +368,11 @@ async function rewriteHistory(
       if ((await dest.countRows()) !== rows || (await source.countRows(retain)) !== rows)
         throw invalid();
       const mapped = await dest.version();
-      target.versions[String(version)] = mapped;
+      versions[String(version)] = mapped;
       // Catalog backups point directly to their replacement versions. Keep individually
       // addressable Lance recovery points for intermediate versions without a catalog.
       if (version > through) {
-        let alias = target.from + '-v' + version;
+        let alias = source.name + '-v' + version;
         while (Object.hasOwn(sourceTags, alias)) alias += '-recovery';
         await tags.create(alias, mapped);
       }
@@ -382,11 +380,12 @@ async function rewriteHistory(
     }
     for (const [name, tag] of Object.entries(sourceTags)) {
       if (name === marker) continue;
-      const version = target.versions[String(tag.version)];
+      const version = versions[String(tag.version)];
       if (!version) throw invalid();
       await tags.create(name, version);
     }
-    await tags.create(lastRebuild(replacement(target.from, receipt.id)), await dest.version());
+    await tags.create(lastRebuild(target), await dest.version());
+    return versions;
   } finally {
     dest.close();
   }
@@ -398,7 +397,7 @@ export async function eraseLibrary(
   signal: AbortSignal,
   progressed?: () => void,
 ) {
-  const entries = [...(await recoveryCatalogs(directory, progressed)).values()];
+  const entries = [...(await recoveryCatalogs(directory, progressed, signal)).values()];
   const folder = path.join(directory, 'lance'),
     journal = path.join(directory, journalName);
   const info = await lstat(folder).catch((e) => {
@@ -444,11 +443,14 @@ export async function eraseLibrary(
       table.close();
     }
   }
+  if (!receipt.tables.length && !receipt.revisions.length &&
+      entries.every(catalog => Object.values(catalog.documents).every(entry => entry.document.baseId !== baseId))) return;
   await atomicFile(journal, receiptBytes(receipt), signal);
   for (const target of receipt.tables) {
     const source = await db.openTable(target.from);
     try {
-      await rewriteHistory(db, source, receipt, target, entries, signal, progressed);
+      target.versions = await rewriteHistory(db, source, replacement(target.from, receipt.id), entries,
+        "baseId != '" + baseId + "'", signal, progressed);
     } finally {
       source.close();
     }

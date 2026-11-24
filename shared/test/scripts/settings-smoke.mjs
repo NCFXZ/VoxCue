@@ -15,7 +15,7 @@ const env = { ...process.env, COPILOT_TEST_USER_DATA: profile, VITE_DEV_SERVER_U
 delete env.ELECTRON_RUN_AS_NODE;
 const app = await electron.launch({ args: [await offlineElectronEntry()], env });
 try {
-  await installUiAccount(app);
+  await installUiAccount(app, { speech: true });
   const login = await app.firstWindow();
   await login.getByRole('heading', { name: '登录 VoxCue', exact: true }).waitFor();
   await login.waitForFunction(() => document.visibilityState === 'visible');
@@ -743,15 +743,14 @@ try {
   await noKnowledgeSettings();
   await category('面试设置').click();
   await settings.getByRole('heading', { name: '面试设置', exact: true }).waitFor();
-  if (process.platform === 'darwin') {
-    const microphoneCheck = settings.getByRole('button', { name: '检查麦克风', exact: true });
-    await microphoneCheck.waitFor();
-    await page.waitForFunction(() =>
-      [...document.querySelectorAll('dialog[open] button')]
-        .some((button) => button.textContent === '检查麦克风' && !button.disabled),
-    );
-    assert.equal(await settings.getByRole('button', { name: '打开音频权限设置', exact: true }).count(), 0);
-  }
+  assert.equal(await settings.getByText('麦克风权限', { exact: true }).count(), 0);
+  const recordingGap = await settings.getByRole('region', { name: '音频设备', exact: true })
+    .evaluate((section) => {
+      const microphone = section.querySelector('[data-settings-target="microphone"]');
+      const recording = section.querySelector('#auto-record-label');
+      return recording.getBoundingClientRect().top - microphone.getBoundingClientRect().bottom;
+    });
+  assert.ok(recordingGap > 0 && recordingGap <= 30, `Microphone-to-recording gap: ${recordingGap}px`);
   await page.screenshot({ animations: 'disabled' });
   await app.evaluate(({ BrowserWindow }) => {
     const window = BrowserWindow.getAllWindows().find((window) => !window.isDestroyed());

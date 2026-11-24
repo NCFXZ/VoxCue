@@ -6,6 +6,7 @@ import type {
 } from '../../electron/contracts/knowledge';
 import { KNOWLEDGE_INDEX_VERSION } from '../../electron/contracts/knowledge';
 import type { LocalDocument } from './knowledgeTypes';
+import { knowledgeRemovalPending, loadKnowledgeRemovals } from './knowledgeRemovals';
 
 export function knowledgeStatusLabel(status: KnowledgeStatus): string {
   if (status.phase === 'ready') return '索引完成';
@@ -70,9 +71,13 @@ export function markBaseRemoval(id: string, pending: boolean) {
 }
 export function assertLibrariesWritable(ids: Iterable<string>) {
   const pending = pendingBaseRemovals();
-  if (!pending.length) return;
   for (const id of ids)
-    if (pending.includes(id)) throw Error('这个知识库正在删除，暂时无法写入资料。');
+    if (pending.includes(id) || knowledgeRemovalPending('base:' + id))
+      throw Error('这个知识库正在删除，暂时无法写入资料。');
+}
+export function assertDocumentsWritable(ids: Iterable<string>) {
+  for (const id of ids)
+    if (knowledgeRemovalPending('file:' + id)) throw Error('这个文档正在删除，暂时无法替换。');
 }
 /** A retry must read the committed winner of a replacement, including a failed transaction. */
 export function holdOriginalReplacements(ids: string[]) {
@@ -101,11 +106,14 @@ export async function indexOriginal(
   current: () => boolean,
   batchId?: string,
 ) {
+  await loadKnowledgeRemovals();
   while (replacing.has(documentId)) await Promise.all(replacing.get(documentId)!);
   if (!current()) return;
-  if (removing.has('file:' + documentId) || removing.has('base:' + baseId) || pendingBaseRemovals().includes(baseId)) return;
+  const pending = () => knowledgeRemovalPending('file:' + documentId) ||
+    knowledgeRemovalPending('base:' + baseId) || pendingBaseRemovals().includes(baseId);
+  if (removing.has('file:' + documentId) || removing.has('base:' + baseId) || pending()) return;
   const owner = { baseId };
-  const live = () => reading.get(documentId) === owner && current() && !pendingBaseRemovals().includes(baseId);
+  const live = () => reading.get(documentId) === owner && current() && !pending();
   reading.set(documentId, owner);
   try {
     const doc = await original();

@@ -21,8 +21,13 @@ let base = argv('base');
 let target = argv('target');
 assert.equal(Boolean(base), Boolean(target), 'Supply both --base and --target ZIP paths');
 const realArchives = Boolean(base);
-const baseVersion = '1.3.2';
-const version = '1.3.3';
+const archiveVersion = file => {
+  const version = /^VoxCue-(\d+\.\d+\.\d+)-arm64\.zip$/.exec(path.basename(file))?.[1];
+  assert.ok(version, 'Use an official versioned Mac ZIP name');
+  return version;
+};
+const baseVersion = realArchives ? archiveVersion(base) : '1.3.2';
+const version = realArchives ? archiveVersion(target) : '1.3.3';
 if (!realArchives) {
   const stable = randomBytes(2 * 1024 ** 2);
   const AdmZip = require('adm-zip');

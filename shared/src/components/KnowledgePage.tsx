@@ -17,9 +17,10 @@ import {
 } from './icons';
 import { Button } from './ui/button';
 import { ConfirmDeleteButton } from './ui/confirm-delete-button';
+import { AnimatedCollection } from './ui/AnimatedCollection';
 import { Modal } from './ui/modal';
 import { useKnowledge } from '../stores/knowledge';
-import { documentAccept } from '../services/knowledge';
+import { documentAccept, documentRevision } from '../services/knowledge';
 import { documentIndexLabel } from '../services/knowledgeIndex';
 import { useComponentReady } from '../stores/components';
 import { ComponentsNotice } from './ComponentsNotice';
@@ -30,7 +31,11 @@ export function KnowledgePage({ onComponentSettings }: { onComponentSettings?: O
   const index = useKnowledgeIndex();
   useEffect(() => index.connect(), []);
   const documents = new Map(index.state?.documents.map(doc => [doc.documentId, doc]));
+  const removingBases = new Set(state.removals.filter(job => !job.documentId).map(job => job.baseId));
+  const removingFiles = new Set(state.removals.map(job => job.documentId));
+  const removingBase = state.selectedId !== null && removingBases.has(state.selectedId);
   const cardStatus = (baseId: string) => {
+    if (removingBases.has(baseId)) return t('正在删除…');
     const percent = index.libraryProgress[baseId];
     return typeof percent === 'number' ? t('索引总进度 {0}%', [percent]) : t('本地资料');
   };
@@ -38,9 +43,28 @@ export function KnowledgePage({ onComponentSettings }: { onComponentSettings?: O
   const [name, setName] = useState('');
   const [editing, setEditing] = useState<'create' | 'rename' | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [gridReady, setGridReady] = useState(state.bases.length > 0);
   const base = state.bases.find((item) => item.id === state.selectedId);
+  const removalAlert = state.removalError && (
+    <div role="alert" className="inline-error knowledge-inline-error">
+      <span>{t(state.removalError)}</span>
+      {state.removals.length > 0 ? (
+        <Button variant="ghost" disabled={state.removalRunning} onClick={() => void state.resumeRemovals()}>
+          {t('重试删除')}
+        </Button>
+      ) : (
+        <Button variant="ghost" size="icon" aria-label={t('关闭错误提示')} onClick={state.dismissRemovalError}>
+          <X size={16} />
+        </Button>
+      )}
+    </div>
+  );
   useEffect(() => {
-    void state.load();
+    let current = true;
+    void state.load().then(() => {
+      if (current) setGridReady(true);
+    });
+    return () => { current = false; };
   }, []);
   return (
     <main className="workspace management-page knowledge-page">
@@ -64,6 +88,7 @@ export function KnowledgePage({ onComponentSettings }: { onComponentSettings?: O
       <div className="management-scroll">
         <div className="management-container">
           <ComponentsNotice only="rag" onSettings={onComponentSettings} />
+          <InterviewReveal>{!base ? removalAlert : null}</InterviewReveal>
           <InterviewReveal resizeKey={state.error ?? ''}>
             {state.error && state.errorBaseId === null && !base && !editing ? (
               <p role="alert" className="inline-error">
@@ -71,51 +96,54 @@ export function KnowledgePage({ onComponentSettings }: { onComponentSettings?: O
               </p>
             ) : null}
           </InterviewReveal>
-          {!state.bases.length ? (
-            <div className="management-empty">
-              <Database size={36} />
-              <h2>{t('创建你的第一个知识库')}</h2>
-              <Button
-                variant="outline"
-                disabled={!ragReady}
-                onClick={() => {
-                  state.dismissEditorError();
-                  setName('');
-                  setEditing('create');
-                }}
+          <AnimatedCollection className="knowledge-grid" enabled={gridReady} wrapped waitForDialogExit>
+            {!state.bases.length ? [
+              <div className="management-empty" key="empty">
+                <Database size={36} />
+                <h2>{t('创建你的第一个知识库')}</h2>
+                <Button
+                  variant="outline"
+                  disabled={!ragReady}
+                  onClick={() => {
+                    state.dismissEditorError();
+                    setName('');
+                    setEditing('create');
+                  }}
+                >
+                  <Plus size={16} />
+                  {t('创建知识库')}
+                </Button>
+              </div>,
+            ] : state.bases.map((item) => (
+              <div
+                className="knowledge-card-wrap"
+                key={item.id}
+                data-motion-revision={JSON.stringify([item.name, typeof index.libraryProgress[item.id] === 'number'])}
               >
-                <Plus size={16} />
-                {t('创建知识库')}
-              </Button>
-            </div>
-          ) : (
-            <div className="knowledge-grid">
-              {state.bases.map((item) => (
-                <div className="knowledge-card-wrap" key={item.id}>
-                  <button
-                    className="knowledge-card"
-                    onClick={() => {
-                      void state.open(item.id);
-                    }}
-                  >
-                    <span className="knowledge-icon">
-                      <Database size={22} />
-                    </span>
-                    <h2>{item.name}</h2>
-                    <p>
-                      {t('创建于 ')}
-                      {new Date(item.createdAt).toLocaleDateString(uiLocale())}
-                    </p>
-                    <span className="card-footer">
-                      {cardStatus(item.id)}
-                      <ChevronRight size={14} />
-                    </span>
-                  </button>
-                  <SyncBadge itemKey={'base:' + item.id} label={item.name} />
-                </div>
-              ))}
-            </div>
-          )}
+                <button
+                  className="knowledge-card"
+                  disabled={removingBases.has(item.id)}
+                  onClick={() => {
+                    void state.open(item.id);
+                  }}
+                >
+                  <span className="knowledge-icon">
+                    <Database size={22} />
+                  </span>
+                  <h2>{item.name}</h2>
+                  <p>
+                    {t('创建于 ')}
+                    {new Date(item.createdAt).toLocaleDateString(uiLocale())}
+                  </p>
+                  <span className="card-footer">
+                    {cardStatus(item.id)}
+                    <ChevronRight size={14} />
+                  </span>
+                </button>
+                <SyncBadge itemKey={'base:' + item.id} label={item.name} />
+              </div>
+            ))}
+          </AnimatedCollection>
         </div>
       </div>
       {base && (
@@ -133,7 +161,7 @@ export function KnowledgePage({ onComponentSettings }: { onComponentSettings?: O
           titleAction={
             <>
               <Button
-                disabled={state.busy}
+                disabled={state.busy || removingBase}
                 variant="ghost"
                 size="icon"
                 className="action-icon-button"
@@ -158,9 +186,9 @@ export function KnowledgePage({ onComponentSettings }: { onComponentSettings?: O
                 aria-label={t('删除知识库')}
                 target={t('知识库：') + base.name}
                 warning={t('将删除这个知识库及全部本地文档，无法恢复')}
-                revision={base.name}
+                revision={documentRevision(base)}
                 active={!editing}
-                disabled={state.busy}
+                disabled={state.busy || removingBase}
                 onConfirm={() =>
                   useKnowledge.getState().selectedId === base.id ? state.removeBase() : false
                 }
@@ -168,6 +196,7 @@ export function KnowledgePage({ onComponentSettings }: { onComponentSettings?: O
             </>
           }
         >
+          <InterviewReveal>{removalAlert}</InterviewReveal>
           <InterviewReveal resizeKey={state.error ?? ''}>
             {state.error && state.errorBaseId === base.id ? (
               <div role="alert" className="inline-error knowledge-inline-error">
@@ -254,26 +283,27 @@ export function KnowledgePage({ onComponentSettings }: { onComponentSettings?: O
               }}
             />
           </div>
-          <div className="document-list">
-            {state.loading ? (
-              <p className="empty-inline">{t('正在读取文档…')}</p>
-            ) : !state.documents.length ? (
-              <p className="empty-inline document-empty">{t('当前知识库还没有文档')}</p>
-            ) : (
-              state.documents.map((doc) => {
+          <AnimatedCollection key={base.id} className="document-list" resizeDialog>
+            {state.loading ? [
+              <p className="empty-inline" key="loading">{t('正在读取文档…')}</p>,
+            ] : !state.documents.length ? [
+              <p className="empty-inline document-empty" key="empty">{t('当前知识库还没有文档')}</p>,
+            ] : state.documents.map((doc) => {
                 const task = index.tasks[doc.id];
                 const deleting = index.deletingDocumentIds?.has(doc.id);
-                const label = documentIndexLabel(documents.get(doc.id), task, {
+                const removing = removingBase || removingFiles.has(doc.id);
+                const label = removing ? '正在删除…' : documentIndexLabel(documents.get(doc.id), task, {
                   requestId: index.requests[doc.id], deleting, hasSnapshot: !!index.state,
                 });
-                const error = !deleting && task?.phase === 'failed' ? task.error : undefined;
+                const error = !removing && !deleting && task?.phase === 'failed' ? task.error : undefined;
                 return (
-                  <div className="document-row" key={doc.id}>
+                  <div className="document-row" key={doc.id}
+                    data-motion-revision={JSON.stringify([documentRevision(doc), label?.replace(/\d+%/, ''), error])}>
                     <FileText size={18} />
                     <div className="document-details">
                       <strong>{doc.name}</strong>
                       <div className="document-status">
-                        <span className="document-status-prefix">
+                        <span className="document-status-prefix" role={removing ? 'status' : undefined}>
                           {doc.size < 1024 ? `${doc.size} B` : `${Math.ceil(doc.size / 1024)} KB`}
                           {label && ' · ' + t(label)}
                           {error ? ': ' : ''}
@@ -287,24 +317,19 @@ export function KnowledgePage({ onComponentSettings }: { onComponentSettings?: O
                       <SyncBadge itemKey={'file:' + doc.id} label={doc.name} />
                       <ConfirmDeleteButton
                         iconOnly
-                        disabled={state.busy}
+                        disabled={state.busy || removing}
                         active={!editing}
                         target={t('文档：') + doc.name}
-                        revision={doc.createdAt}
+                        revision={documentRevision(doc)}
                         warning={t('将删除原件及当前索引，无法恢复')}
                         aria-label={t('删除文档 ') + doc.name}
-                        onConfirm={async () => {
-                          const ok = await state.removeDocument(doc.id);
-                          if (ok) await index.refresh();
-                          return ok;
-                        }}
+                        onConfirm={() => useKnowledge.getState().selectedId === base.id ? state.removeDocument(doc.id) : false}
                       />
                     </div>
                   </div>
                 );
-              })
-            )}
-          </div>
+            })}
+          </AnimatedCollection>
         </Modal>
       )}
       {editing && (

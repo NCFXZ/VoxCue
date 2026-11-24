@@ -347,18 +347,28 @@ p {
 }
 .sidebar {
   --sidebar-expanded-width: 230px;
+  --sidebar-collapsed-width: 68px;
+  --sidebar-inset: 10px;
+  --sidebar-content-width: calc(var(--sidebar-expanded-width) - 2 * var(--sidebar-inset));
+  --sidebar-compact-button-size: 44px;
+  --sidebar-row-width: var(--sidebar-content-width);
+  --sidebar-motion: var(--panel-motion-duration) var(--panel-motion-easing);
+  --sidebar-label-delay: calc(var(--panel-motion-duration) / 5);
+  --sidebar-label-stagger: calc(var(--panel-motion-duration) / 16);
   width: var(--sidebar-expanded-width);
   flex-shrink: 0;
-  padding: 16px 10px 12px;
+  padding: 16px var(--sidebar-inset) 12px;
   display: flex;
   flex-direction: column;
   background: transparent;
-  transition: width var(--panel-motion-duration) var(--panel-motion-easing);
+  transition: width var(--sidebar-motion);
   overflow: clip;
 }
-.sidebar:not(.collapsed) > :is(.sidebar-heading, nav, .sidebar-conversations, .sidebar-bottom) {
-  width: calc(var(--sidebar-expanded-width) - 20px);
-  min-width: calc(var(--sidebar-expanded-width) - 20px);
+.sidebar.collapsed {
+  --sidebar-row-width: var(--sidebar-compact-button-size);
+  width: var(--sidebar-collapsed-width);
+}
+.sidebar > :is(.sidebar-heading, nav, .sidebar-bottom) {
   flex-shrink: 0;
 }
 .sidebar-heading {
@@ -366,11 +376,18 @@ p {
   align-items: center;
   justify-content: space-between;
   padding: 0 5px 18px;
+  transition: padding-inline-end var(--sidebar-motion);
+}
+.sidebar.collapsed .sidebar-heading {
+  padding-inline-end: calc((var(--sidebar-collapsed-width) - var(--icon-button-size)) / 2 - var(--sidebar-inset));
 }
 .sidebar-wordmark {
   display: flex;
   align-items: center;
   gap: 10px;
+  min-width: 0;
+  overflow: clip;
+  white-space: nowrap;
 }
 .sidebar-wordmark strong {
   font-size: var(--type-title);
@@ -456,13 +473,14 @@ p {
 }
 .nav-item,
 .settings-sidebar nav button {
-  transition:
+  --nav-appearance-transition:
     font-weight var(--panel-motion-duration) var(--panel-motion-easing),
     color var(--panel-motion-duration) var(--panel-motion-easing),
     background-color var(--panel-motion-duration) var(--panel-motion-easing),
     opacity 0.18s,
     border-color 0.18s,
     box-shadow 0.18s;
+  transition: var(--nav-appearance-transition);
 }
 .selection-label {
   display: inline-grid;
@@ -491,7 +509,8 @@ p {
 }
 .nav-item {
   position: relative;
-  width: 100%;
+  width: var(--sidebar-row-width);
+  height: 36px;
   border: 0;
   background: transparent;
   display: flex;
@@ -499,12 +518,24 @@ p {
   gap: 9px;
   padding: 8px 10px;
   border-radius: var(--radius-control);
-  min-height: 36px;
-  margin-bottom: 2px;
+  margin: 0 auto 2px;
+  overflow: clip;
+  white-space: nowrap;
   font-size: var(--type-body);
   font-weight: 400;
   color: var(--foreground);
   text-align: left;
+  transition:
+    width var(--sidebar-motion),
+    height var(--sidebar-motion),
+    padding var(--sidebar-motion),
+    var(--nav-appearance-transition);
+}
+.sidebar.collapsed :is(.nav-item, .conversation-row) {
+  height: var(--sidebar-compact-button-size);
+}
+.sidebar.collapsed .nav-item {
+  padding-inline: calc((var(--sidebar-compact-button-size) - 18px) / 2);
 }
 .nav-item.active {
   background: var(--selected);
@@ -529,17 +560,24 @@ p {
   font-size: var(--type-secondary);
   letter-spacing: 0.5px;
   color: var(--muted);
-  padding: 20px 10px 10px;
+  white-space: nowrap;
+  width: var(--sidebar-row-width);
+  max-width: 100%;
+  block-size: calc(1lh + 30px);
+  margin-inline: auto;
+  padding: 20px 10px 0;
+  overflow: clip;
 }
 .conversation {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: var(--conversation-label-gap);
   font-size: var(--type-body);
-  padding: 8px 10px;
+  padding: 8px var(--conversation-padding);
   min-height: 36px;
   border: 0;
   background: transparent;
+  transition: padding-inline var(--sidebar-motion);
 }
 .conversation-dot {
   --dot-read: #98a5a6;
@@ -583,13 +621,33 @@ p {
   }
 }
 .sidebar-conversations {
-  overflow-y: auto;
+  --conversation-padding: 10px;
+  --conversation-dot-slot: 14px;
+  --conversation-label-gap: 9px;
+  --conversation-delete-inset: 6px;
+  --confirm-idle-width: 32px;
+  position: relative;
+  overflow: hidden auto;
   min-height: 0;
+  margin-inline: calc(-1 * var(--sidebar-inset));
+  scrollbar-width: thin;
+  scrollbar-gutter: stable both-edges;
+}
+.sidebar-conversations[data-collection-resizing][data-collection-fits] {
+  overflow-y: hidden;
 }
 .conversation-row {
   display: flex;
   align-items: center;
+  width: var(--sidebar-row-width);
+  max-width: 100%;
+  height: 36px;
+  margin-inline: auto;
   border-radius: var(--radius-control);
+  transition:
+    width var(--sidebar-motion),
+    height var(--sidebar-motion),
+    margin-block-end var(--sidebar-motion);
 }
 .conversation-row.active {
   background: var(--selected);
@@ -602,10 +660,50 @@ p {
   min-width: 0;
   text-align: left;
 }
-.conversation-row .conversation > span:last-child {
+.conversation-title {
+  /* Keep the same ellipsis while a label fades into the growing row. */
+  flex-shrink: 0;
+  max-width: calc(
+    var(--sidebar-content-width) - 2 * var(--conversation-padding) - var(--conversation-dot-slot) -
+      var(--conversation-label-gap) - var(--confirm-idle-width) - var(--conversation-delete-inset)
+  );
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.conversation-row:has(> .confirm-delete-control.is-confirming) .conversation-title {
+  flex-shrink: 1;
+}
+.sidebar-conversations::before {
+  /* The caption keeps the space for the divider during the transition. */
+  content: '';
+  position: absolute;
+  inset: 12px 0 auto;
+  width: var(--sidebar-compact-button-size);
+  height: 1px;
+  margin-inline: auto;
+  background: var(--account-card-border);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--sidebar-motion);
+}
+.sidebar.collapsed .sidebar-conversations::before {
+  opacity: 1;
+}
+.sidebar.collapsed .section-caption {
+  block-size: 21px;
+}
+.sidebar.collapsed .conversation-row {
+  margin-block-end: 2px;
+}
+.sidebar.collapsed .conversation {
+  height: 100%;
+  padding: 0 calc((var(--sidebar-compact-button-size) - var(--conversation-dot-slot)) / 2);
+  border-radius: inherit;
+  overflow: clip;
+}
+.sidebar.collapsed .conversation-row > .confirm-delete-control {
+  display: none;
 }
 .conversation-delete {
   flex-shrink: 0;
@@ -626,6 +724,7 @@ p {
   column-gap: 7px;
   color: #5e7776;
   flex-wrap: wrap;
+  transition: margin-inline var(--sidebar-motion);
 }
 .dark .local-note {
   color: #90aaa7;
@@ -648,6 +747,7 @@ p {
   gap: 8px;
   width: 100%;
   min-height: 32px;
+  transition: padding-inline-start var(--sidebar-motion);
 }
 .sidebar-update.ui-button {
   color: var(--accent);
@@ -753,7 +853,7 @@ p {
   display: none;
 }
 .collapsed .sidebar-status-row {
-  justify-content: center;
+  padding-inline-start: calc((var(--sidebar-collapsed-width) - var(--icon-button-size)) / 2 - var(--sidebar-inset));
 }
 .collapsed .local-note {
   margin-inline: 0;
@@ -786,16 +886,39 @@ p {
   margin-top: 3px;
 }
 .user-button {
+  --account-avatar-size: 31px;
+  --account-chevron-size: 14px;
+  --account-padding: 8px;
+  --account-gap: 9px;
+  --account-label-width: calc(var(--sidebar-content-width) - 2 * (1px + var(--account-padding) + var(--account-gap)) - var(--account-avatar-size) - var(--account-chevron-size));
   border: 1px solid var(--account-card-border);
   border-radius: var(--radius-card);
   background: var(--account-card-surface);
   box-shadow: var(--account-card-shadow);
   display: flex;
   align-items: center;
-  width: 100%;
-  padding: 10px 8px;
-  gap: 9px;
+  width: var(--sidebar-content-width);
+  height: auto;
+  margin-inline: auto;
+  padding: 10px var(--account-padding);
+  gap: var(--account-gap);
+  overflow: clip;
   text-align: left;
+  interpolate-size: allow-keywords;
+  transition:
+    width var(--sidebar-motion),
+    height var(--sidebar-motion),
+    padding var(--sidebar-motion),
+    background 0.18s,
+    color 0.18s,
+    opacity 0.18s,
+    border-color 0.18s,
+    box-shadow 0.18s;
+}
+.sidebar.collapsed .user-button {
+  width: var(--sidebar-compact-button-size);
+  height: var(--sidebar-compact-button-size);
+  padding: 0 calc((var(--sidebar-compact-button-size) - var(--account-avatar-size)) / 2 - 1px);
 }
 .user-button:hover,
 .user-button:focus-visible,
@@ -805,14 +928,10 @@ p {
 .user-button[data-state='closed'] > svg {
   transform: rotate(180deg);
 }
-@media (prefers-reduced-motion: no-preference) {
-  .user-button > svg {
-    transition: transform var(--panel-motion-duration) var(--panel-motion-easing);
-  }
-}
 .avatar {
-  height: 31px;
-  width: 31px;
+  height: var(--account-avatar-size);
+  width: var(--account-avatar-size);
+  flex-shrink: 0;
   display: grid;
   place-items: center;
   border-radius: 50%;
@@ -832,6 +951,7 @@ p {
 }
 .user-info strong,
 .user-info small {
+  width: var(--account-label-width);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -846,55 +966,69 @@ p {
   color: var(--muted);
   display: block;
 }
-.sidebar:not(.collapsed) .user-button:has(.account-usage-summary:is(.is-low, .is-inline)) {
+.user-button:has(.account-usage-summary:is(.is-low, .is-inline)) {
+  --account-chevron-size: 15px;
   display: grid;
-  grid-template-columns: 31px minmax(0, 1fr) 15px;
+  grid-template-columns: var(--account-avatar-size) minmax(0, 1fr) var(--account-chevron-size);
+  align-content: center;
   row-gap: 2px;
 }
-.sidebar:not(.collapsed)
-  .user-button:has(.account-usage-summary:is(.is-low, .is-inline))
-  .user-info {
+.user-button:has(.account-usage-summary:is(.is-low, .is-inline)) .user-info {
   display: contents;
 }
-.sidebar:not(.collapsed) .user-button:has(.account-usage-summary:is(.is-low, .is-inline)) .avatar {
+.user-button:has(.account-usage-summary:is(.is-low, .is-inline)) .avatar {
   grid-column: 1;
   grid-row: 1 / 3;
 }
-.sidebar:not(.collapsed)
-  .user-button:has(.account-usage-summary:is(.is-low, .is-inline))
-  .user-info
-  small {
+.user-button:has(.account-usage-summary:is(.is-low, .is-inline)) .user-info small {
+  width: calc(var(--account-label-width) + var(--account-chevron-size) + var(--account-gap));
   grid-column: 2 / -1;
   grid-row: 2;
 }
-.sidebar:not(.collapsed) .user-button:has(.account-usage-summary:is(.is-low, .is-inline)) > svg {
+.user-button:has(.account-usage-summary:is(.is-low, .is-inline)) > svg {
   grid-column: 3;
   grid-row: 1 / 3;
 }
-.collapsed {
-  width: 68px;
-  padding-left: 10px;
-  padding-right: 10px;
+.sidebar .nav-item:nth-child(2) {
+  --sidebar-label-order: 1;
 }
-.collapsed .sidebar-wordmark,
-.collapsed .nav-item span,
-.collapsed .nav-item small,
-.collapsed .nav-item kbd,
-.collapsed .user-info,
-.collapsed .user-button > svg {
-  display: none;
+.sidebar .nav-item:nth-child(3) {
+  --sidebar-label-order: 2;
 }
-.collapsed .sidebar-heading {
-  justify-content: center;
+.sidebar .section-caption {
+  --sidebar-label-order: 3;
+  --sidebar-label-layout-transition: width var(--sidebar-motion), block-size var(--sidebar-motion);
 }
-.collapsed .nav-item,
-.collapsed .user-button {
-  width: 44px;
-  height: 44px;
-  flex-shrink: 0;
-  margin-inline: auto;
-  justify-content: center;
-  padding: 0;
+.sidebar-conversations {
+  --sidebar-label-order: 4;
+}
+.sidebar .conversation-row:nth-of-type(2) {
+  --sidebar-label-order: 5;
+}
+.sidebar :is(.conversation-row:nth-of-type(n + 3), .user-button) {
+  --sidebar-label-order: 6;
+}
+.sidebar :is(.sidebar-wordmark, .nav-item > span, .section-caption, .conversation-title, .user-info > *, .user-button > svg) {
+  --sidebar-label-start: calc(var(--sidebar-label-delay) + var(--sidebar-label-order, 0) * var(--sidebar-label-stagger));
+  transition:
+    opacity calc(var(--panel-motion-duration) * 0.65) ease-in-out var(--sidebar-label-start),
+    visibility 0s var(--sidebar-label-start),
+    var(--sidebar-label-layout-transition, transform var(--sidebar-motion));
+}
+.sidebar.collapsed :is(.sidebar-wordmark, .nav-item > span, .section-caption, .conversation-title, .user-info > *, .user-button > svg) {
+  --sidebar-label-exit-duration: calc(var(--panel-motion-duration) / 5);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition:
+    opacity var(--sidebar-label-exit-duration) ease-out,
+    visibility 0s var(--sidebar-label-exit-duration),
+    var(--sidebar-label-layout-transition, transform var(--sidebar-motion));
+}
+@media (prefers-reduced-motion: reduce) {
+  .sidebar {
+    --panel-motion-duration: 0ms;
+  }
 }
 :root {
   --select-menu-frame: 6px;
@@ -1123,7 +1257,11 @@ p {
   display: block;
   min-height: 2lh;
   max-height: 11lh;
+}
+.chat-composer textarea,
+.floating-answer .floating-composer textarea {
   overflow-y: auto;
+  scrollbar-gutter: stable;
 }
 .composer-bottom {
   display: flex;
@@ -1434,6 +1572,7 @@ p {
 .knowledge-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  align-content: start;
   gap: 16px;
 }
 .knowledge-card {
@@ -1567,13 +1706,17 @@ p {
 .app-dialog[data-overlay-header] > .dialog-heading::before {
   content: '';
   position: absolute;
-  /* The scrollbar track starts below the header; its top gutter still needs material. */
   inset: 0 calc(-1 * var(--dialog-scrollbar-width, 0px)) 0 0;
   z-index: -1;
   pointer-events: none;
   background: var(--surface);
   border-bottom: 1px solid var(--border);
   opacity: var(--dialog-header-opacity, 0);
+}
+.knowledge-detail-dialog[data-overlay-header] > .dialog-heading::before {
+  /* Extend the paint into the gutter without extending the heading's scroll area. */
+  inset-inline-end: 0;
+  box-shadow: var(--dialog-scrollbar-width, 0px) 0 var(--surface);
 }
 .app-dialog[data-overlay-header] > .dialog-scroll {
   padding-top: calc(var(--dialog-header-height, 72px) + 16px);
@@ -2680,12 +2823,15 @@ p {
   }
 }
 .chat-attachments {
+  --attachment-gap: 8px;
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  align-content: flex-start;
+  gap: var(--attachment-gap);
 }
-.chat-attachments:empty {
-  display: none;
+.chat-attachments[data-collection-resizing] {
+  overflow: clip;
+  overflow-clip-margin: var(--attachment-gap);
 }
 .chat-attachment {
   --confirm-idle-width: var(--icon-button-size);
@@ -3995,6 +4141,7 @@ article.account-quota > .interview-reveal :is(.account-quota-state, p) {
 /* Count the reserved track inside the dialog's existing right inset. */
 .interview-start-dialog > .dialog-scroll,
 .account-migration-wizard > .dialog-scroll,
+.knowledge-detail-dialog > .dialog-scroll,
 .interview-settings-dialog:not(.remote-connection-dialog) > .dialog-scroll {
   scrollbar-gutter: stable;
   padding-inline-end: max(0px, calc(var(--dialog-header-inset) - var(--dialog-scrollbar-width, 0px)));
@@ -4330,7 +4477,7 @@ article.account-quota > .interview-reveal :is(.account-quota-state, p) {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 12px;
-  padding-block: 12px;
+  padding-block-start: 12px;
 }
 .speech-device {
   min-width: 0;
@@ -4763,32 +4910,19 @@ details[open] > summary > .disclosure-chevron {
   position: relative;
   width: 32px;
   overflow: hidden;
-  gap: 0;
+  interpolate-size: allow-keywords;
   transition:
     width var(--button-morph-duration) var(--button-morph-easing),
     background-color var(--button-morph-duration) var(--button-morph-easing),
     color var(--button-morph-duration) var(--button-morph-easing);
 }
 .floating-confirm-action.ui-button.is-confirming {
-  width: 104px;
-  gap: 7px;
-  border-radius: 999px;
-  corner-shape: round;
+  width: max-content;
 }
-.floating-confirm-action span {
-  white-space: nowrap;
-}
-:root:lang(en) .floating-end.ui-button.is-confirming {
-  width: 136px;
-}
-:root:lang(en) .floating-confirm-action .button-morph-expanded {
-  margin-inline-start: 0;
-}
-.floating-capture.ui-button.is-confirming {
-  width: 184px;
-}
-:root:lang(en) .floating-capture.ui-button.is-confirming {
-  width: 208px;
+.floating-confirm-action .button-morph-idle {
+  position: absolute;
+  inset: 50% auto auto 50%;
+  translate: -50% -50%;
 }
 .floating-composer {
   padding: 14px 16px 10px;
@@ -5201,8 +5335,8 @@ details[open] > summary > .disclosure-chevron {
 }
 
 .conversation-indicator {
-  width: 14px;
-  height: 14px;
+  width: var(--conversation-dot-slot);
+  height: var(--conversation-dot-slot);
   flex-shrink: 0;
   display: inline-grid;
   place-items: center;
@@ -5280,12 +5414,6 @@ details[open] > summary > .disclosure-chevron {
   overflow-wrap: anywhere;
 }
 .interview-access-status .interview-readiness-level {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 14px;
-  height: 14px;
-  gap: 2px;
   color: var(--accent);
 }
 .interview-access .danger-text {
@@ -6369,9 +6497,13 @@ details[open] > summary > .disclosure-chevron {
   justify-content: center;
   opacity: 0;
   transform: scale(0.8);
+}
+.interview-readiness-symbol > span,
+.interview-readiness-level {
   transition:
     opacity 160ms ease,
-    transform 160ms ease;
+    transform 160ms ease,
+    --input-level 90ms ease-out;
 }
 .interview-readiness-symbol > [data-active='true'] {
   opacity: 1;
@@ -6384,22 +6516,34 @@ details[open] > summary > .disclosure-chevron {
 .interview-readiness-symbol .is-loading svg {
   animation: conversation-spin 1s linear infinite;
 }
-.interview-readiness-symbol .interview-readiness-level {
-  gap: 2px;
+@property --input-level {
+  syntax: '<number>';
+  inherits: true;
+  initial-value: 0.16;
+}
+.interview-readiness-level {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  gap: 1px;
 }
 .interview-readiness-level i {
   display: block;
-  width: 3px;
-  border-radius: 4px;
+  width: 2px;
+  height: calc(var(--wave-height) * var(--input-level));
+  min-height: 2px;
+  border-radius: 999px;
+  corner-shape: round;
   background: currentColor;
-  transform: scaleY(var(--input-level));
-  transition: transform 90ms ease-out;
 }
 @media (prefers-reduced-motion: no-preference) {
   .interview-readiness-level[data-active='true'] i {
     animation: input-wave-pulse 520ms ease-in-out -160ms infinite alternate;
   }
-  .interview-readiness-level[data-active='true'] i:nth-child(2) {
+  .interview-readiness-level[data-active='true'] i:nth-child(even) {
     animation-duration: 380ms;
     animation-delay: -320ms;
   }
@@ -6407,11 +6551,14 @@ details[open] > summary > .disclosure-chevron {
     animation-duration: 450ms;
     animation-delay: -60ms;
   }
+  .interview-readiness-level[data-active='true'] i:last-child {
+    animation-delay: -240ms;
+  }
 }
-/* The individual pulse is layered over the measured input-level transform. */
+/* Change height so the ends stay round throughout both level and pulse changes. */
 @keyframes input-wave-pulse {
-  from { scale: 1 0.38; }
-  to { scale: 1 1; }
+  from { height: calc(var(--wave-height) * var(--input-level) * 0.38); }
+  to { height: calc(var(--wave-height) * var(--input-level)); }
 }
 .interview-badge-tooltip {
   position: absolute;
@@ -6450,7 +6597,7 @@ details[open] > summary > .disclosure-chevron {
 @media (prefers-reduced-motion: reduce) {
   .interview-ready-badge,
   .interview-readiness-symbol > span,
-  .interview-readiness-level i,
+  .interview-readiness-level,
   .interview-badge-tooltip {
     transition: none;
   }
@@ -7290,8 +7437,7 @@ small {
   opacity: 1;
   transform: translateY(0);
 }
-.confirm-delete-confirm,
-.button-morph-expanded {
+.confirm-delete-confirm {
   position: absolute;
   left: 50%;
   margin-inline-start: -1px;
@@ -7299,15 +7445,22 @@ small {
   opacity: 0;
   transform: translate(-50%, calc(-50% + var(--button-morph-shift)));
 }
+.button-morph-expanded {
+  opacity: 0;
+  transform: translateY(var(--button-morph-shift));
+}
 .confirm-delete.is-confirming .confirm-delete-idle,
 .floating-confirm-action.is-confirming .button-morph-idle {
   opacity: 0;
   transform: translateY(calc(-1 * var(--button-morph-shift)));
 }
-.confirm-delete.is-confirming .confirm-delete-confirm,
-.floating-confirm-action.is-confirming .button-morph-expanded {
+.confirm-delete.is-confirming .confirm-delete-confirm {
   opacity: 1;
   transform: translate(-50%, -50%);
+}
+.floating-confirm-action.is-confirming .button-morph-expanded {
+  opacity: 1;
+  transform: translateY(0);
 }
 .confirm-delete-error {
   position: absolute;
@@ -7327,7 +7480,7 @@ small {
   opacity: 1;
 }
 .conversation-row > .confirm-delete-control {
-  margin-inline-end: 6px;
+  margin-inline-end: var(--conversation-delete-inset);
 }
 .confirm-delete.is-compact.ui-button {
   height: 32px;
@@ -7821,8 +7974,8 @@ small {
   line-height: 28px;
 }
 
-.native-window-controls .sidebar.collapsed {
-  width: 84px;
+.native-window-controls .sidebar {
+  --sidebar-collapsed-width: 84px;
 }
 .native-window-controls .sidebar-heading {
   min-height: 50px;
@@ -7839,12 +7992,12 @@ small {
   corner-shape: round;
   z-index: 1;
   transition:
-    top var(--panel-motion-duration) var(--panel-motion-easing),
-    right var(--panel-motion-duration) var(--panel-motion-easing);
+    top var(--sidebar-motion),
+    right var(--sidebar-motion);
 }
 .native-window-controls .sidebar.collapsed .sidebar-toggle-button {
   top: 54px;
-  right: calc(50% - 18px);
+  right: calc((var(--sidebar-collapsed-width) - var(--icon-button-size)) / 2);
 }
 .dialog-title-line {
   display: flex;
@@ -8485,6 +8638,9 @@ svg[data-ui-icon] {
 .history-row-wrap {
   position: relative;
   min-width: 0;
+}
+.knowledge-grid > .management-empty {
+  grid-column: 1 / -1;
 }
 .knowledge-card-wrap > .knowledge-card {
   width: 100%;
@@ -9321,6 +9477,9 @@ svg.ui-loader {
 :where([data-settings-target], [data-settings-highlight-group])[data-location-highlight]::before {
   /* Cover the dividers and their antialiased edges at fractional display scales. */
   inset: -2px -12px;
+}
+.speech-device-grid[data-location-highlight]::before {
+  inset-block-end: -12px;
 }
 .speech-controls > .remote-connection-settings[data-location-highlight]::before {
   inset-block-end: calc(-2px - var(--speech-section-gap));

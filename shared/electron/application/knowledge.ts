@@ -102,6 +102,7 @@ export class KnowledgeCoordinator {
   private withdrawnRequests = new Set<string>();
   private active = new Map<string, { controller: AbortController; documentId?: string; baseId?: string; withdrawn?: boolean }>();
   private removingBases = new Set<string>();
+  private removingDocuments = new Set<string>();
   private tasks = new Map<string, { status: KnowledgeStatus; baseId?: string }>();
   private deletingOldIndex?: Extract<KnowledgeEvent, { active: true }>;
   private snapshot?: Promise<KnowledgeState>;
@@ -206,6 +207,9 @@ export class KnowledgeCoordinator {
       throw Error('知识库请求过多或请求 ID 重复。');
     if ((call.op === 'import' || call.op === 'begin-index-batch' || call.op === 'remove-base') && this.removingBases.has(call.baseId))
       throw Error('资料处理中，请稍后重试。');
+    if ((call.op === 'begin-index-batch' && call.documentIds.some(id => this.removingDocuments.has(id))) ||
+        ('documentId' in call && this.removingDocuments.has(call.documentId)))
+      throw Error('文档处理中，请稍后重试。');
     const batch = this.batch;
     if ((call.op === 'begin-index-batch' && this.withdrawnRequests.has(call.requestId)) ||
       (call.op === 'import' && (this.withdrawnRequests.has(call.requestId) ||
@@ -282,28 +286,33 @@ export class KnowledgeCoordinator {
         }
         case 'invalidate':
         case 'remove':
-          if (batch) await this.cancelBatch(false);
+          if (call.op === 'remove') this.removingDocuments.add(call.documentId);
+          if (batch && (call.op === 'invalidate' || batch.members.has(call.documentId)))
+            await this.cancelBatch(false);
           for (const a of this.active.values())
             if (a.documentId === call.documentId) a.controller.abort();
           if (call.op === 'invalidate')
             return await this.core.invalidateDocument(call.documentId, signal);
           await this.core.removeDocument(call.documentId, signal);
           this.tasks.delete(call.documentId);
+          this.changeVersion++;
           return null;
-        case 'remove-base':
+        case 'remove-base': {
           this.removingBases.add(call.baseId);
-          if (batch) await this.cancelBatch(false);
+          const rollback = batch?.baseId === call.baseId ? this.cancelBatch(false).catch(() => {}) : undefined;
           for (const entry of this.active.values()) {
             if (entry.baseId !== call.baseId || !entry.documentId) continue;
             this.progress({ documentId: entry.documentId, phase: 'cancelled', completed: 0, total: 0 });
             entry.withdrawn = true;
             entry.controller.abort();
           }
-          await this.core.removeBase(call.baseId, signal);
+          try { await this.core.removeBase(call.baseId, signal); }
+          finally { await rollback; }
           for (const [id, task] of this.tasks)
             if (task.baseId === call.baseId) this.tasks.delete(id);
           this.changeVersion++;
           return null;
+        }
         case 'search':
           return await this.core.search(
             call.query,
@@ -332,6 +341,7 @@ export class KnowledgeCoordinator {
     } finally {
       if (call.op === 'import') this.importBytes -= call.bytes.byteLength;
       if (call.op === 'remove-base') this.removingBases.delete(call.baseId);
+      if (call.op === 'remove') this.removingDocuments.delete(call.documentId);
       this.active.delete(call.requestId);
     }
   }

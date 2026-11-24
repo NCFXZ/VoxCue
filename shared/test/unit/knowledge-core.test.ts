@@ -14,6 +14,8 @@ import { profileDirectory } from '../../electron/accountProfilePaths';
 import type { ProfileMoveReceipt } from '../../electron/backend/profileMoveReceipt';
 import type { OldIndexDeletion } from '../../../shared/electron/contracts/knowledge';
 import type { Catalog } from '../../../shared/electron/backend/knowledge/eraseLibrary';
+import { migrateLibraryLayout } from '../../electron/backend/knowledge/libraryMigration';
+import { ensurePublishedLibrary, libraryKey, readLayout, removeLibraryFolder } from '../../electron/backend/knowledge/libraryLayout';
 import { parseText, searchUnits } from '../../../shared/electron/backend/knowledge/chunks';
 import type { Embedder } from '../../../shared/electron/backend/knowledge/types';
 import type { PrepareKnowledgeDatabase } from '../../electron/platform/types';
@@ -75,8 +77,8 @@ describe('LanceDB 正式知识核心（真实 DB、合成测试向量）', () =>
     const prepareDatabase: PrepareKnowledgeDatabase | undefined = process.platform === 'win32'
       ? (await import('../../../windows/electron/knowledgePath')).prepareKnowledgeDatabase
       : undefined;
-    const open = (databasePath?: string) =>
-      new KnowledgeService(root, embedder(), undefined, undefined, undefined, false, databasePath);
+    const open = (databasePath?: string, directory = root) =>
+      new KnowledgeService(directory, embedder(), undefined, undefined, undefined, false, databasePath);
     const lease = prepareDatabase?.(path.join(root, 'lance'));
     const seed = open(lease?.path), original = input('moved', 'Synthetic moved original.');
     const kept = { ...input('keep', 'Retained unrelated original.'), baseId: 'another' };
@@ -109,20 +111,20 @@ describe('LanceDB 正式知识核心（真实 DB、合成测试向量）', () =>
     fork.mockImplementation(() => {
       let core: KnowledgeService;
       const child = Object.assign(new EventEmitter(), {
-        kill: () => { queueMicrotask(() => child.emit('exit', 0)); return true; },
-        postMessage: async (m: { id: string; init?: { databasePath?: string }; op?: string; baseId: string }) => {
+        kill: () => { void Promise.resolve(core?.close()).finally(() => child.emit('exit', 0)); return true; },
+        postMessage: async (m: { id: string; init?: { directory: string; databasePath?: string }; op?: string; baseId?: string }) => {
           try {
             let value;
             if (m.init) {
-              core = open(m.init.databasePath);
+              core = open(m.init.databasePath, m.init.directory);
               await core.initialize();
             }
             else if (m.op === 'list') value = await core.listDocuments();
             else if (m.op === 'clean-upgraded-index') await core.cleanUpgradedIndex(signal());
-            else if (m.op === 'remove-base') await core.removeBase(m.baseId, signal());
+            else if (m.op === 'remove-base') await core.removeBase(m.baseId!, signal());
             else if (m.op === 'close') await core.close();
             else throw Error('Unexpected migration index operation');
-            child.emit('message', { id: m.id, value, needsIndexCleanup: core.needsIndexCleanup });
+            child.emit('message', { id: m.id, value, needsIndexCleanup: core?.needsIndexCleanup });
           } catch (error) {
             child.emit('message', { id: m.id, error: String(error) });
           }
@@ -149,6 +151,75 @@ describe('LanceDB 正式知识核心（真实 DB、合成测试向量）', () =>
       expect(await readdir(path.join(root, 'revisions'))).toEqual([prior.documents.keep.revision]);
       expect(await readFile(body)).toEqual(expected);
     } finally { fork.mockReset(); }
+  }, 30000);
+
+  it('discards old shared indexes before rebuilding and resumes interrupted cleanup', async () => {
+    const root = await directory(), legacy = new KnowledgeService(root, embedder());
+    const first = input('leaving', 'Synthetic erasure marker.');
+    const keep = { ...input('retained', 'Synthetic retained marker.'), baseId: 'keep' };
+    try {
+      await legacy.indexDocument(first, signal());
+      await legacy.indexDocument(keep, signal());
+    } finally { await legacy.close(); }
+    const original = await readCatalog(root);
+    const raw = await readFile(path.join(root, 'catalog.json'));
+    const publish = fs.rename;
+    const swapping = vi.spyOn(fs, 'rename').mockImplementation(async (from, to) => {
+      if (to === path.join(root, 'libraries')) throw Error('synthetic activation interrupted');
+      await publish(from, to);
+    });
+    syncBuiltinESMExports();
+    try {
+      await expect(migrateLibraryLayout(root)).rejects.toThrow('synthetic activation interrupted');
+      expect(await readLayout(root)).toBeUndefined();
+      expect(await readFile(path.join(root, 'catalog.json'))).toEqual(raw);
+    } finally { swapping.mockRestore(); syncBuiltinESMExports(); }
+
+    const remove = fs.rm;
+    const oldTable = path.join(root, 'lance', original.tableName + '.lance');
+    const interrupted = vi.spyOn(fs, 'rm').mockImplementation(async (file, options) => {
+      if (file === oldTable) throw Error('synthetic interruption after publishing');
+      await remove(file, options);
+    });
+    syncBuiltinESMExports();
+    try {
+      await expect(migrateLibraryLayout(root)).rejects.toThrow('synthetic interruption after publishing');
+      expect((await readLayout(root))?.legacy?.tables).toEqual([original.tableName]);
+      expect(await readFile(path.join(root, 'catalog.json'))).toEqual(raw);
+    } finally { interrupted.mockRestore(); syncBuiltinESMExports(); }
+
+    await migrateLibraryLayout(root);
+    expect(await readLayout(root)).toEqual({ legacy: undefined });
+    await expect(lstat(oldTable)).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(lstat(path.join(root, 'catalog.json'))).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(await readdir(path.join(root, 'libraries'))).toEqual(['layout.json']);
+    expect(await readdir(path.join(root, 'revisions'))).toEqual([]);
+    for (const doc of [first, keep]) {
+      await ensurePublishedLibrary(root, doc.baseId);
+      const library = new KnowledgeService(path.join(root, 'libraries', libraryKey(doc.baseId)), embedder());
+      try { await library.indexDocument(doc, signal()); }
+      finally { await library.close(); }
+    }
+    await migrateLibraryLayout(root);
+    const key = libraryKey(first.baseId), pending = path.join(root, 'removed-libraries', key, 'index');
+    const interruptedDelete = vi.spyOn(fs, 'rm').mockImplementation(async (file, options) => {
+      if (file === pending) {
+        await remove(path.join(pending, 'owner.json'));
+        throw Error('synthetic interruption after detaching');
+      }
+      await remove(file, options);
+    });
+    syncBuiltinESMExports();
+    try { await expect(removeLibraryFolder(root, first.baseId, signal())).rejects.toThrow('synthetic interruption after detaching'); }
+    finally { interruptedDelete.mockRestore(); syncBuiltinESMExports(); }
+    await expect(lstat(path.join(root, 'libraries', key))).rejects.toMatchObject({ code: 'ENOENT' });
+    await removeLibraryFolder(root, first.baseId, signal());
+    await expect(lstat(pending)).rejects.toMatchObject({ code: 'ENOENT' });
+    const retained = new KnowledgeService(path.join(root, 'libraries', libraryKey(keep.baseId)), embedder());
+    try {
+      expect((await retained.listDocuments()).map(doc => doc.documentId)).toEqual([keep.documentId]);
+      expect((await retained.search('retained marker', 5, 'keyword', signal(), keep.baseId))[0]?.documentId).toBe(keep.documentId);
+    } finally { await retained.close(); }
   }, 30000);
   it('cleans every legacy revision before ordinary indexing, resumes cleanup on reopen and re-encodes even unchanged originals', async () => {
     const root = await directory();
@@ -834,11 +905,12 @@ describe('LanceDB 正式知识核心（真实 DB、合成测试向量）', () =>
       });
       try { await expect(core.removeBase('base-a', ctrl.signal)).rejects.toBeDefined(); }
       finally { spy.mockRestore(); }
-      expect((await core.listDocuments()).map(d => d.documentId)).toEqual(['a', 'b']);
+      expect(await readdir(root)).not.toContain('.library-erasure.json');
       expect(await db.tableNames()).toEqual([name]);
       expect(await readFile(path.join(root, 'catalog.json'), 'utf8')).toBe(raw);
+      await core.indexDocument({ ...input('c', 'another retained document'), baseId: 'other' }, signal());
       await core.removeBase('base-a', signal());
-      expect((await core.listDocuments()).map(d => d.documentId)).toEqual(['b']);
+      expect((await core.listDocuments()).map(d => d.documentId)).toEqual(['b', 'c']);
     } finally { db?.close(); await core.close(); }
   }, 30_000);
   it('keeps the reader on committed versions during an import and refreshes after commit', async () => {

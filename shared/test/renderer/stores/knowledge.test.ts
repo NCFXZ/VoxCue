@@ -1,16 +1,27 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { KnowledgeRemoval } from '../../../src/services/knowledgeRemovals';
 const mocks = vi.hoisted(() => ({
   listBases: vi.fn(),
   listDocuments: vi.fn(),
+  createBase: vi.fn(),
   saveBase: vi.fn(),
-  deleteBase: vi.fn(),
   importDocuments: vi.fn(),
-  deleteDocument: vi.fn(),
   validateFiles: vi.fn(),
+  queueKnowledgeRemoval: vi.fn(),
+  completeKnowledgeRemoval: vi.fn(),
+  listKnowledgeRemovals: vi.fn(),
 }));
 vi.mock('../../../../shared/src/services/knowledge', () => ({
   localKnowledge: mocks,
   validateFiles: mocks.validateFiles,
+  documentRevision: () => 'reviewed',
+  queueKnowledgeRemoval: mocks.queueKnowledgeRemoval,
+  completeKnowledgeRemoval: mocks.completeKnowledgeRemoval,
+  listKnowledgeRemovals: mocks.listKnowledgeRemovals,
+}));
+vi.mock('../../../src/services/knowledgeRemovals', async (load) => ({
+  ...await load<typeof import('../../../src/services/knowledgeRemovals')>(),
+  loadKnowledgeRemovals: async () => {},
 }));
 import { useKnowledge } from '../../../../shared/src/stores/knowledge';
 const deferred = <T>() => {
@@ -26,6 +37,14 @@ beforeEach(() => {
   vi.resetAllMocks();
   mocks.listBases.mockResolvedValue([]);
   mocks.listDocuments.mockResolvedValue([]);
+  mocks.createBase.mockImplementation(async (name) => ({ id: 'new-base', name, createdAt: 1 }));
+  const pending = new Set<KnowledgeRemoval>();
+  mocks.queueKnowledgeRemoval.mockImplementation(async (job: KnowledgeRemoval) => {
+    pending.add(job);
+    return 'queued';
+  });
+  mocks.completeKnowledgeRemoval.mockImplementation(async (job: KnowledgeRemoval) => { pending.delete(job); });
+  mocks.listKnowledgeRemovals.mockImplementation(() => [...pending]);
   useKnowledge.setState({
     bases: [],
     documents: [],
@@ -35,6 +54,9 @@ beforeEach(() => {
     error: null,
     errorBaseId: null,
     editorError: null,
+    removals: [],
+    removalError: null,
+    removalRunning: false,
   });
 });
 describe('知识库对抗性状态切换', () => {
@@ -148,16 +170,21 @@ describe('知识库对抗性状态切换', () => {
       errorBaseId: null,
     });
   });
-  it('删除失败或忙碌时明确返回失败，不让按钮将失败当作成功', async () => {
-    mocks.deleteDocument.mockRejectedValueOnce(new Error('合成删除失败'));
+  it('任务落盘失败时拒绝确认，后台删除失败后可以重试', async () => {
+    mocks.listDocuments.mockResolvedValue([{ id: 'doc', baseId: 'base' }]);
+    await useKnowledge.getState().open('base');
+    mocks.queueKnowledgeRemoval.mockRejectedValueOnce(new Error('合成任务保存失败'));
     expect(await useKnowledge.getState().removeDocument('doc')).toBe(false);
-    expect(useKnowledge.getState().error).toBe('合成删除失败');
-    expect(useKnowledge.getState().busy).toBe(false);
-    mocks.deleteDocument.mockResolvedValueOnce(undefined);
+    expect(useKnowledge.getState().error).toBe('合成任务保存失败');
+    expect(mocks.completeKnowledgeRemoval).not.toHaveBeenCalled();
+    mocks.completeKnowledgeRemoval.mockRejectedValueOnce(new Error('合成后台删除失败'));
     expect(await useKnowledge.getState().removeDocument('doc')).toBe(true);
-    useKnowledge.setState({ busy: true });
-    expect(await useKnowledge.getState().removeDocument('doc')).toBe(false);
-    expect(mocks.deleteDocument).toHaveBeenCalledTimes(2);
+    expect(useKnowledge.getState().busy).toBe(false);
+    await vi.waitFor(() => expect(useKnowledge.getState().removalError).toBe('合成后台删除失败'));
+    expect(useKnowledge.getState().removals).toHaveLength(1);
+    await useKnowledge.getState().resumeRemovals();
+    expect(useKnowledge.getState().removals).toEqual([]);
+    expect(mocks.completeKnowledgeRemoval).toHaveBeenCalledTimes(2);
   });
   it('切换知识库后忽略旧列表失败，列表读取保留操作错误', async () => {
     let reject!: (error: Error) => void;
@@ -207,25 +234,29 @@ describe('知识库对抗性状态切换', () => {
     const deletion = deferred<void>();
     const earlierRead = deferred<unknown[]>();
     mocks.listDocuments
-      .mockResolvedValueOnce([{ id: 'old' }])
+      .mockResolvedValueOnce([{ id: 'old', baseId: 'base' }])
       .mockReturnValueOnce(earlierRead.promise)
       .mockResolvedValueOnce([]);
-    mocks.deleteDocument.mockReturnValueOnce(deletion.promise);
+    const complete = mocks.completeKnowledgeRemoval.getMockImplementation();
+    mocks.completeKnowledgeRemoval.mockImplementationOnce(async (job) => {
+      await deletion.promise;
+      await complete?.(job);
+    });
     await useKnowledge.getState().open('base');
-    const removing = useKnowledge.getState().removeDocument('old');
+    expect(await useKnowledge.getState().removeDocument('old')).toBe(true);
     const refreshing = useKnowledge.getState().open('base');
     deletion.resolve();
-    expect(await removing).toBe(true);
+    await useKnowledge.getState().resumeRemovals();
     earlierRead.resolve([{ id: 'old' }]);
     await refreshing;
     expect(useKnowledge.getState()).toMatchObject({ selectedId: 'base', documents: [], busy: false });
   });
   it('重复提交创建不会写入两个知识库', async () => {
     const pending = deferred<void>();
-    mocks.saveBase.mockReturnValue(pending.promise);
+    mocks.createBase.mockReturnValue(pending.promise.then(() => ({ id: 'new-base', name: '重复测试', createdAt: 1 })));
     const first = useKnowledge.getState().create('重复测试');
     const second = useKnowledge.getState().create('重复测试');
-    expect(mocks.saveBase).toHaveBeenCalledTimes(1);
+    expect(mocks.createBase).toHaveBeenCalledTimes(1);
     pending.resolve();
     await Promise.all([first, second]);
     expect(useKnowledge.getState().busy).toBe(false);
@@ -291,11 +322,17 @@ describe('知识库对抗性状态切换', () => {
   });
   it('删除旧知识库完成时不关闭后来打开的知识库', async () => {
     const pending = deferred<void>();
-    mocks.deleteBase.mockReturnValue(pending.promise);
-    const first = useKnowledge.getState().removeBase();
+    useKnowledge.setState({ bases: [{ id: 'base', name: '待删除', createdAt: 1 }] });
+    const complete = mocks.completeKnowledgeRemoval.getMockImplementation();
+    mocks.completeKnowledgeRemoval.mockImplementationOnce(async (job) => {
+      await pending.promise;
+      await complete?.(job);
+    });
+    expect(await useKnowledge.getState().removeBase()).toBe(true);
+    expect(useKnowledge.getState().selectedId).toBeNull();
     await useKnowledge.getState().open('other');
     pending.resolve();
-    await first;
+    await useKnowledge.getState().resumeRemovals();
     expect(useKnowledge.getState().selectedId).toBe('other');
   });
 });

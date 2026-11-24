@@ -35,6 +35,20 @@ const app = await electron.launch({
   env: { ...process.env, COPILOT_TEST_USER_DATA: profile, VITE_DEV_SERVER_URL: '' },
 });
 const checks = [];
+async function assertInputWave(wave) {
+  await wave.waitFor();
+  const bars = wave.locator('i');
+  assert.equal(await bars.count(), 5);
+  assert.equal(
+    await bars.evaluateAll((elements) => elements.every((bar) => {
+      const { width, height } = bar.getBoundingClientRect();
+      return width > 0 && height + 0.01 >= width &&
+        Number.parseFloat(getComputedStyle(bar).borderTopLeftRadius) >= width / 2;
+    })),
+    true,
+    'Each of the five bars keeps two rounded caps as it changes height',
+  );
+}
 async function capture(page, name) {
   // Media emulation acknowledges before Chromium necessarily paints the new
   // palette. Flush its style/frame update before waiting for finite transitions.
@@ -1066,6 +1080,11 @@ try {
   await start.getByRole('button', { name: '重新检查', exact: true }).click();
   await start.locator('.interview-access[aria-busy="false"] .interview-access-status').first().waitFor();
   assert.ok(await start.getByRole('button', { name: '确认开始', exact: true }).isEnabled());
+  await Promise.all(['麦克风', '系统音频'].map((source) => assertInputWave(
+    start.locator('.interview-access-list > li')
+      .filter({ has: page.getByText(source, { exact: true }) })
+      .locator('.interview-readiness-level'),
+  )));
 
   // Observe from creation: production deduplicates unchanged native states.
   // A late observer can miss an already-enabled passthrough state entirely.
@@ -1093,24 +1112,30 @@ try {
     globalThis.uxHost.emit({ type: 'activity', source: 'microphone', speaking: true, level: 0.08 });
     globalThis.uxHost.emit({ type: 'activity', source: 'system', speaking: false, level: 0.04 });
   });
-  await badge('麦克风', '有输入').waitFor();
-  await badge('系统音频', '有输入').waitFor();
+  const activeWave = (source) => badge(source, '有输入').locator('.interview-readiness-level');
+  await Promise.all(['麦克风', '系统音频'].map((source) => assertInputWave(activeWave(source))));
   assert.equal(await badge('语音模型', '有输入').count(), 0);
-  const bars = floating.locator(
-    '.interview-ready-badge[aria-label^="麦克风："] .interview-readiness-level i',
+  const waveSelector = '.interview-ready-badge[aria-label^="麦克风："] .interview-readiness-level';
+  const microphoneWave = floating.locator(waveSelector);
+  assert.equal(await microphoneWave.evaluate((wave) => {
+    const style = getComputedStyle(wave);
+    const levelTransition = style.transitionProperty.split(', ').indexOf('--input-level');
+    return style.transitionDuration.split(', ')[levelTransition];
+  }), '0.09s');
+  await floating.waitForFunction((selector) => {
+    const wave = document.querySelector(selector);
+    return wave && Number(getComputedStyle(wave).getPropertyValue('--input-level')) > 0.2;
+  }, waveSelector);
+  const firstLevel = await microphoneWave.evaluate(
+    (wave) => Number(getComputedStyle(wave).getPropertyValue('--input-level')),
   );
-  assert.equal(await bars.count(), 3);
-  assert.equal(await bars.first().evaluate((e) => getComputedStyle(e).transitionDuration), '0.09s');
-  const firstLevel = await bars.first().evaluate((e) => getComputedStyle(e).transform);
   await app.evaluate(() =>
     globalThis.uxHost.emit({ type: 'activity', source: 'microphone', speaking: false, level: 0 }),
   );
-  await floating.waitForFunction((before) => {
-    const bar = document.querySelector(
-      '.interview-ready-badge[aria-label^="麦克风："] .interview-readiness-level i',
-    );
-    return bar && getComputedStyle(bar).transform !== before;
-  }, firstLevel);
+  await floating.waitForFunction(({ selector, before }) => {
+    const wave = document.querySelector(selector);
+    return wave && Number(getComputedStyle(wave).getPropertyValue('--input-level')) < before;
+  }, { selector: waveSelector, before: firstLevel });
   await badge('麦克风', '正常').waitFor();
   await badge('系统音频', '正常').waitFor();
   await app.evaluate(() => {
@@ -1210,16 +1235,19 @@ try {
     await hoverProbe.dispose();
   }
   await capture(floating, '15-compact-status');
+  await floating.emulateMedia({ reducedMotion: 'reduce' });
+  assert.equal(await microphoneWave.evaluate((wave) => getComputedStyle(wave).transitionDuration), '0s');
+  assert.equal(await microphoneWave.locator('i').evaluateAll((bars) =>
+    bars.every((bar) => getComputedStyle(bar).animationName === 'none'),
+  ), true);
+  await floating.emulateMedia({ reducedMotion: 'no-preference' });
   await app.evaluate(() => {
     clearInterval(globalThis.uxBadgeActivity);
     globalThis.uxHost.emit({ type: 'activity', source: 'system', speaking: false, level: 0 });
   });
   await badge('系统音频', '正常').waitFor();
-  await floating.emulateMedia({ reducedMotion: 'reduce' });
-  assert.equal(await bars.first().evaluate((e) => getComputedStyle(e).transitionDuration), '0s');
-  await floating.emulateMedia({ reducedMotion: 'no-preference' });
   checks.push(
-    'compact status uses actual source activity with animated decay, source-specific warning tooltip, disabled/paused states and reduced-motion support',
+    'all four meters show five rounded bars with live levels, and compact status retains decay, source warnings, disabled/paused states and reduced-motion support',
   );
   await app.evaluate(() => {
     const at = Date.now();

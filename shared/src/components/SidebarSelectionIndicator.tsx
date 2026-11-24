@@ -22,7 +22,8 @@ export function SidebarSelectionIndicator({
     const schedule = () => {
       if (!frame) frame = requestAnimationFrame(update);
     };
-    const resize = new ResizeObserver(schedule);
+    // Align the marker with the resized row before that frame is painted.
+    const resize = new ResizeObserver(update);
     function update() {
       cancelAnimationFrame(frame);
       frame = 0;
@@ -124,6 +125,7 @@ export function SidebarSelectionIndicator({
       attributeFilter: ['class', 'aria-current', 'hidden'],
     });
     sidebar.addEventListener('scroll', schedule, { capture: true, passive: true });
+    sidebar.addEventListener('collection-motion', update);
     window.addEventListener('resize', schedule);
     preference.addEventListener('change', schedule);
     measure.current = update;
@@ -133,6 +135,7 @@ export function SidebarSelectionIndicator({
       resize.disconnect();
       changes.disconnect();
       sidebar.removeEventListener('scroll', schedule, true);
+      sidebar.removeEventListener('collection-motion', update);
       window.removeEventListener('resize', schedule);
       preference.removeEventListener('change', schedule);
       measure.current = undefined;

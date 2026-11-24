@@ -31,7 +31,7 @@ await writeFile(
 const {app,utilityProcess}=require('electron'),assert=require('node:assert/strict');
 app.disableHardwareAcceleration();
 const base=${JSON.stringify(path.join(workspace.platformRoot, 'dist-electron/shared/electron/backend'))};
-const {SpeechHost}=require(base+'/speech/host.js'),{KnowledgeHost}=require(base+'/knowledge/host.js');
+const {SpeechHost}=require(base+'/speech/host.js'),{LibraryKnowledgeHost}=require(base+'/knowledge/workerHost.js');
 const fixture=${JSON.stringify(utility)};
 app.whenReady().then(async()=>{
  const events=[],speech=new SpeechHost('synthetic-not-read','synthetic',e=>events.push(e),fixture);
@@ -58,7 +58,7 @@ app.whenReady().then(async()=>{
    assert.equal(file,require('node:path').join(base,'knowledge','process.js'));
    return fork.call(utilityProcess,fixture,args,options);
   };
-  const knowledge=new KnowledgeHost(${JSON.stringify(path.join(testRoot, 'knowledge'))},'synthetic-not-read');
+  const knowledge=new LibraryKnowledgeHost(${JSON.stringify(path.join(testRoot, 'knowledge'))},'synthetic-not-read');
   try{await knowledge.initialize();assert.deepEqual(await knowledge.listDocuments(),[]);await knowledge.close();}
   finally{utilityProcess.fork=fork;await knowledge.close().catch(()=>{});}
   console.log('PASS: real Electron speech/knowledge utility drains 8 MiB per output pipe; kill=false retains the fence, late IPC is ignored, pending calls settle within the existing 10s budget and only real exit permits manual restart.');

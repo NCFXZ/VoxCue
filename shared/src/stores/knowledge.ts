@@ -4,11 +4,16 @@ import { recordFeature } from '../services/telemetry';
 import { create } from 'zustand';
 import { componentReady } from './components';
 import {
+  completeKnowledgeRemoval,
+  documentRevision,
+  listKnowledgeRemovals,
   localKnowledge,
+  queueKnowledgeRemoval,
   validateFiles,
   type KnowledgeBase,
   type LocalDocument,
 } from '../services/knowledge';
+import { knowledgeRemovalKey, loadKnowledgeRemovals, type KnowledgeRemoval } from '../services/knowledgeRemovals';
 interface KnowledgeState {
   bases: KnowledgeBase[];
   documents: LocalDocument[];
@@ -18,8 +23,13 @@ interface KnowledgeState {
   error: string | null;
   errorBaseId: string | null;
   editorError: string | null;
+  removals: KnowledgeRemoval[];
+  removalError: string | null;
+  removalRunning: boolean;
   dismissError(): void;
   dismissEditorError(): void;
+  dismissRemovalError(): void;
+  resumeRemovals(): Promise<void>;
   load(): Promise<void>;
   open(id: string | null): Promise<void>;
   create(name: string): Promise<boolean>;
@@ -32,6 +42,7 @@ const message = (error: unknown) => (error instanceof Error ? error.message : 'æ
 let documentRequest = 0;
 let selectionRevision = 0;
 let basesRequest = 0;
+let removalWork: Promise<void> | undefined;
 export const useKnowledge = create<KnowledgeState>((set, get) => ({
   bases: [],
   documents: [],
@@ -41,11 +52,46 @@ export const useKnowledge = create<KnowledgeState>((set, get) => ({
   error: null,
   errorBaseId: null,
   editorError: null,
+  removals: [],
+  removalError: null,
+  removalRunning: false,
   dismissError() {
     set({ error: null, errorBaseId: null });
   },
   dismissEditorError() {
     set({ editorError: null });
+  },
+  dismissRemovalError() {
+    set({ removalError: null });
+  },
+  resumeRemovals() {
+    return removalWork ??= (async () => {
+      await loadKnowledgeRemovals();
+      const removals = listKnowledgeRemovals();
+      if (!removals.length) return;
+      set({ removals, removalError: null, removalRunning: true });
+      const attempted = new Set<string>();
+      let removal: KnowledgeRemoval | undefined;
+      while ((removal = listKnowledgeRemovals().find(item => !attempted.has(knowledgeRemovalKey(item))))) {
+        attempted.add(knowledgeRemovalKey(removal));
+        try {
+          await completeKnowledgeRemoval(removal);
+        } catch (error) {
+          set({ removalError: message(error) });
+        }
+        set({ removals: listKnowledgeRemovals() });
+        const { baseId, documentId } = removal;
+        if (!documentId) await get().load();
+        if (get().selectedId === baseId) {
+          if (documentId) await get().open(baseId);
+          else if (!get().bases.some(base => base.id === baseId)) await get().open(null);
+        }
+      }
+      void useKnowledgeIndex.getState().refresh();
+    })().catch(error => set({ removalError: message(error) })).finally(() => {
+      removalWork = undefined;
+      set({ removalRunning: false });
+    });
   },
   async load() {
     const request = ++basesRequest;
@@ -94,8 +140,7 @@ export const useKnowledge = create<KnowledgeState>((set, get) => ({
     if (get().busy) return false;
     set({ busy: true, editorError: null });
     try {
-      const base = { id: crypto.randomUUID(), name: name.trim(), createdAt: Date.now() };
-      await localKnowledge.saveBase(base);
+      const base = await localKnowledge.createBase(name);
       const listing = ++basesRequest;
       const bases = await localKnowledge.listBases();
       if (listing === basesRequest) set({ bases });
@@ -130,21 +175,23 @@ export const useKnowledge = create<KnowledgeState>((set, get) => ({
   },
   async removeBase() {
     if (get().busy) return false;
-    const id = get().selectedId;
-    if (!id) return false;
+    const base = get().bases.find(item => item.id === get().selectedId);
+    if (!base) return false;
+    const id = base.id;
     const selection = selectionRevision;
-    set({ busy: true, error: null, errorBaseId: null });
+    set({ error: null, errorBaseId: null });
     try {
-      await localKnowledge.deleteBase(id);
+      const result = await queueKnowledgeRemoval({ baseId: id, revision: documentRevision(base) });
+      if (!result) return false;
+      set({ removals: listKnowledgeRemovals() });
       if (get().selectedId === id && selection === selectionRevision) await get().open(null);
-      await get().load();
+      if (result === 'removed') await get().load();
+      else void get().resumeRemovals();
       return true;
     } catch (error) {
       if (selection === selectionRevision && get().selectedId === id)
         set({ error: message(error), errorBaseId: id });
       return false;
-    } finally {
-      set({ busy: false });
     }
   },
   async importFiles(files) {
@@ -181,19 +228,20 @@ export const useKnowledge = create<KnowledgeState>((set, get) => ({
   async removeDocument(id) {
     if (get().busy) return false;
     const baseId = get().selectedId;
+    const doc = get().documents.find(item => item.id === id && item.baseId === baseId);
+    if (!doc) return false;
     const selection = selectionRevision;
-    set({ busy: true, error: null, errorBaseId: null });
+    set({ error: null, errorBaseId: null });
     try {
-      await localKnowledge.deleteDocument(id);
-      if (baseId && get().selectedId === baseId && selection === selectionRevision)
-        await get().open(baseId);
+      if (!await queueKnowledgeRemoval({ baseId: doc.baseId, documentId: id, revision: documentRevision(doc) }))
+        return false;
+      set({ removals: listKnowledgeRemovals() });
+      void get().resumeRemovals();
       return true;
     } catch (error) {
       if (selection === selectionRevision && get().selectedId === baseId)
         set({ error: message(error), errorBaseId: baseId });
       return false;
-    } finally {
-      set({ busy: false });
     }
   },
 }));

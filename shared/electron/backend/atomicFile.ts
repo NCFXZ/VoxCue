@@ -15,16 +15,19 @@ export async function atomicFile(file: string, value: string | Buffer, signal?: 
     }
     signal?.throwIfAborted();
     await rename(temporary, file);
-    if (process.platform !== 'win32') {
-      const directory = await open(path.dirname(file), 'r');
-      try {
-        await directory.sync();
-      } finally {
-        await directory.close();
-      }
-    }
+    await syncDirectory(path.dirname(file));
   } finally {
     await rm(temporary, { force: true });
+  }
+}
+
+export async function syncDirectory(folder: string) {
+  if (process.platform === 'win32') return;
+  const directory = await open(folder, 'r');
+  try {
+    await directory.sync();
+  } finally {
+    await directory.close();
   }
 }
 

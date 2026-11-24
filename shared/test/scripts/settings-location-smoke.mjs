@@ -32,10 +32,12 @@ async function mark(page, row) {
       ? [...node.querySelectorAll('.speech-select, .choice-trigger')].map(control => control.getBoundingClientRect()) : [];
     const card = node.closest('.account-service')?.querySelector('.account-usage-card');
     const next = node.matches('.speech-controls > .remote-connection-settings') ? node.nextElementSibling : null;
+    const recording = node.matches('.speech-device-grid') ? node.nextElementSibling?.querySelector('#auto-record-label') : null;
     return {
       audio: controls.length ? [Math.min(...controls.map(control => control.top)) - top,
         bottom - Math.max(...controls.map(control => control.bottom))] : null,
       cardGap: card && node.matches('.settings-entry') ? card.getBoundingClientRect().top - bottom : null,
+      recordingGap: recording ? recording.getBoundingClientRect().top - bottom : null,
       remote: next && {
         dividerCovered: bottom >= next.getBoundingClientRect().top + parseFloat(getComputedStyle(next).borderTopWidth),
         headingGap: next.querySelector('h3').getBoundingClientRect().top - bottom,
@@ -44,6 +46,8 @@ async function mark(page, row) {
   });
   if (clearance.audio) assert.ok(clearance.audio.every(gap => gap >= 12),
     'Audio controls need breathing room inside the highlight: ' + JSON.stringify(clearance));
+  if (clearance.recordingGap !== null) assert.ok(clearance.recordingGap > 0,
+    'The audio device highlight must stop before the recording label: ' + JSON.stringify(clearance));
   // DOM rectangles can differ by floating-point noise at fractional display scales.
   if (clearance.cardGap !== null) assert.ok(Math.round(clearance.cardGap * 64) >= 12 * 64,
     'A separate rounded quota card must stay clear of the header highlight: ' + JSON.stringify(clearance));

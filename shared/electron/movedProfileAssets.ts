@@ -5,6 +5,8 @@ import type { SourceRemovalResult } from './contracts/accountData';
 import { InterviewImageStore } from './backend/interview/images';
 import type { RecordingLibrary } from './backend/interview/recordings';
 import { KnowledgeHost } from './backend/knowledge/host';
+import { readLayout } from './backend/knowledge/libraryLayout';
+import { LibraryKnowledgeHost } from './backend/knowledge/workerHost';
 import type { PrepareKnowledgeDatabase } from './platform/types';
 import type { ProfileMoveReceipt } from './backend/profileMoveReceipt';
 import { checkMovedRecordings, removeMovedRecordings } from './backend/profileRecordingTransfer';
@@ -63,7 +65,10 @@ export async function checkOrRemoveMovedProfileAssets(
   const removeResume = !!resume && removed.documentIds.includes(resume);
   const index = path.join(root, 'knowledge-v1');
   if ((!bases.length && !removeResume) || !(await existsAtExpectedPath(index))) return;
-  const host = new KnowledgeHost(index, model, undefined, prepareKnowledgeDatabase);
+  // Removing selected assets from an inactive older profile is not a request
+  // to rebuild its entire index. Keep that cleanup scoped to the moved data.
+  const Host = await readLayout(index) ? KnowledgeHost : LibraryKnowledgeHost;
+  const host = new Host(index, model, undefined, prepareKnowledgeDatabase);
   try {
     // A moved library can have searchable recovery versions even after its last original is gone.
     for (const item of bases) {

@@ -1,7 +1,8 @@
 import { openChatDatabase, transferStoredChats, validateChatSnapshot, type StoredSnapshot } from './chats';
-import { openDocumentsDatabase } from './knowledge';
+import { openDocumentsDatabase, recordLibraryOriginal } from './knowledge';
 import { openOriginalBackups, originalBackupsDatabase as backupDB } from './originalBackups';
-import { assertLibrariesWritable } from './knowledgeIndex';
+import { assertDocumentsWritable, assertLibrariesWritable } from './knowledgeIndex';
+import { loadKnowledgeRemovals } from './knowledgeRemovals';
 import type { LocalDocument } from './knowledgeTypes';
 import { historyRepository, historyStorageKey, readExistingHistory, readHistorySnapshot } from './history';
 import { legacyProfileModificationKey, profileStorageKey, readStoredProfile, storedObject } from './storedValues';
@@ -390,6 +391,7 @@ export async function receiveLegacyBrowserData(port: MessagePort, owner: string)
       if (!storedObject(base) || typeof base.id !== 'string' || typeof base.name !== 'string')
         throw invalid();
       const baseId = base.id;
+      await loadKnowledgeRemovals();
       return update(await database(docsDB), 'bases', baseId, old => {
         assertLibrariesWritable([baseId]);
         return old ? undefined : base;
@@ -421,11 +423,16 @@ export async function receiveLegacyBrowserData(port: MessagePort, owner: string)
     )
       throw invalid();
     const baseId = metadata.baseId;
+    const documentId = metadata.id;
+    await loadKnowledgeRemovals();
     assertLibrariesWritable([baseId]);
+    assertDocumentsWritable([documentId]);
     if (entry === 'backup') {
       if (typeof metadata.backupId !== 'string') throw invalid();
       return update(await database(backupDB), 'versions', metadata.backupId, old => {
         assertLibrariesWritable([baseId]);
+        assertDocumentsWritable([documentId]);
+        if (!old) recordLibraryOriginal(baseId);
         return old ? undefined : { ...metadata, blob };
       });
     }
@@ -462,6 +469,8 @@ export async function receiveLegacyBrowserData(port: MessagePort, owner: string)
     }
     await update(db, 'documents', metadata.id, old => {
       assertLibrariesWritable([baseId]);
+      assertDocumentsWritable([documentId]);
+      if (!old) recordLibraryOriginal(baseId);
       return old ? undefined : { ...metadata, name, blob };
     });
     existingDocs.ids.add(metadata.id);

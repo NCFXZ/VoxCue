@@ -165,11 +165,14 @@ try {
   assert.ok(captureWidths.some(width => width > captureWidths[0] + 2 && width < captureWidths.at(-1) - 2), 'Reveal confirmation must have real intermediate width frames');
   const confirmCapture = floating.getByRole('button', { name: '确认显示面试窗口', exact: true });
   await confirmCapture.waitFor();
-  assert.ok(await confirmCapture.evaluate(button => {
+  const confirmationInsets = (control) => control.evaluate(async (button) => {
+    await Promise.all(button.getAnimations().map(animation => animation.finished));
     const bounds = button.getBoundingClientRect();
-    const label = button.querySelector('.button-morph-expanded').getBoundingClientRect();
-    return label.left >= bounds.left + 4 && label.right <= bounds.right - 4;
-  }), 'The confirmation must show the complete action and window name');
+    const content = button.querySelector('.button-morph-expanded').getBoundingClientRect();
+    return [content.left - bounds.left, bounds.right - content.right];
+  });
+  const captureInsets = await confirmationInsets(confirmCapture);
+  assert.ok(Math.min(...captureInsets) >= 4, 'The confirmation must show the complete action and window name');
   await captureRequested(floating.locator('.floating-toolbar'), 'capture-confirmation');
   const protectedState = () => app.evaluate(({ BrowserWindow }) =>
     BrowserWindow.getAllWindows().find(win => win.webContents.getURL().endsWith('#interview')).isContentProtected());
@@ -289,11 +292,13 @@ try {
   });
   await floating.screenshot({});
   await floating.getByRole('button', { name: '结束面试', exact: true }).click();
-  await floating.getByRole('button', { name: '确认结束面试', exact: true }).waitFor();
+  const confirmEnd = floating.getByRole('button', { name: '确认结束面试', exact: true });
+  await confirmEnd.waitFor();
+  const endInsets = await confirmationInsets(confirmEnd);
+  assert.ok(captureInsets.every((inset, side) => Math.abs(inset - endInsets[side]) < 0.1),
+    `Both expanded confirmations must have matching insets (${captureInsets} and ${endInsets})`);
   assert.equal(
-    await floating
-      .getByRole('button', { name: '确认结束面试', exact: true })
-      .evaluate((element) => element.classList.contains('button-destructive')),
+    await confirmEnd.evaluate((element) => element.classList.contains('button-destructive')),
     true,
   );
   assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 2);

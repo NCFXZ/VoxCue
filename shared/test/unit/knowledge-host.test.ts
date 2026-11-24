@@ -1,8 +1,9 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
-import { KnowledgeHost } from '../../../shared/electron/backend/knowledge/host';
+import { LibraryKnowledgeHost as KnowledgeHost } from '../../electron/backend/knowledge/workerHost';
 import { KnowledgeError } from '../../../shared/electron/backend/knowledge/errors';
 import type { PrepareKnowledgeDatabase } from '../../electron/backend/knowledge/types';
+import { KnowledgeCoordinator } from '../../electron/application/knowledge';
 
 const native = vi.hoisted(() => ({ fork: vi.fn() }));
 vi.mock('electron', () => ({ utilityProcess: { fork: native.fork } }));
@@ -114,13 +115,13 @@ it.each(['complete', 'stall'] as const)('allows a busy library erase past ten mi
     expect(request.op).toBe('remove-base');
     child.emit('message', { id: request.id, started: true });
     const waiting = new AbortController();
-    const other = host.invalidateDocument('unrelated', waiting.signal);
+    const other = host.search('unrelated', 5, 'keyword', waiting.signal);
     const cancelled = expect(other).rejects.toBeDefined();
     await vi.advanceTimersByTimeAsync(550000);
     child.emit('message', { id: request.id, erasureProgress: 1 });
     await vi.advanceTimersByTimeAsync(550000);
     expect(child.kill).not.toHaveBeenCalled();
-    expect(child.postMessage.mock.calls.some(([m]) => m.op === 'invalidate')).toBe(false);
+    expect(child.postMessage.mock.calls.some(([m]) => m.op === 'search')).toBe(false);
     waiting.abort();
     await cancelled;
     if (outcome === 'complete') {
@@ -248,7 +249,7 @@ it('holds reads behind a library purge while allowing the caller to cancel its w
   const purging = host.removeBase('target', new AbortController().signal);
   const waiting = new AbortController();
   const cancelled = expect(host.search('synthetic', 5, 'keyword', waiting.signal)).rejects.toMatchObject({ name: 'AbortError' });
-  const listing = host.listDocuments();
+  const listing = host.listDocuments(false);
   waiting.abort();
   await cancelled;
   await vi.waitFor(() => expect(child.postMessage.mock.calls.at(-1)?.[0].op).toBe('remove-base'));
@@ -258,6 +259,139 @@ it('holds reads behind a library purge while allowing the caller to cancel its w
   await vi.waitFor(() => expect(child.postMessage.mock.calls.at(-1)?.[0].op).toBe('list'));
   child.emit('message', { id: child.postMessage.mock.calls.at(-1)![0].id, value: [] });
   await expect(listing).resolves.toEqual([]);
+});
+
+it.each([
+  ['remove-base', true], ['remove-base', false], ['remove', true], ['remove', false],
+] as const)('%s allows another library to finish its batch, removal starts first = %s', async (op, removalFirst) => {
+  const { host, child } = setup();
+  const coordinator = new KnowledgeCoordinator(host, '/synthetic/models', vi.fn());
+  const attempts: string[] = [];
+  child.postMessage.mockImplementation(m => {
+    if (m.op === op) {
+      attempts.push(m.id);
+      return;
+    }
+    const reply = m.cancel ? { id: m.cancel, error: '知识库操作已取消。', errorCode: 'cancelled' } : { id: m.id, value: null };
+    queueMicrotask(() => child.emit('message', reply));
+  });
+  const remove = () => coordinator.call(op === 'remove-base'
+    ? { op, baseId: 'target', requestId: 'delete' }
+    : { op, documentId: 'deleted-file', requestId: 'delete' });
+  const imported = (documentId: string, baseId = 'keep', batchId?: string) => coordinator.call({
+    op: 'import', requestId: 'index-' + documentId, documentId, baseId, batchId,
+    name: 'synthetic.txt', bytes: new Uint8Array([1]),
+  });
+  let removal = removalFirst ? remove() : undefined;
+  if (removalFirst) await vi.waitFor(() => expect(attempts).toHaveLength(1));
+  try {
+    await coordinator.call({ op: 'begin-index-batch', requestId: 'batch', baseId: 'keep', documentIds: ['one', 'two'] });
+    removal ??= remove();
+    await expect(imported('deleted-file', 'target')).rejects.toThrow(/处理中/);
+    await imported('one', 'keep', 'batch');
+    // The writer must keep its reservation even while no import call is active.
+    expect(attempts).toHaveLength(removalFirst ? 1 : 0);
+    await imported('two', 'keep', 'batch');
+    await coordinator.call({ op: 'finish-index-batch', requestId: 'commit', batchId: 'batch', commit: true });
+    await vi.waitFor(() => expect(attempts).toHaveLength(removalFirst ? 2 : 1));
+    expect(child.postMessage.mock.calls.map(([m]) => m.op).filter(Boolean)).toEqual([
+      ...(removalFirst ? [op] : []), 'begin-index-batch', 'index', 'index', 'finish-index-batch', op,
+    ]);
+    if (removalFirst) expect(child.postMessage).toHaveBeenCalledWith({ cancel: attempts[0] });
+    child.emit('message', { id: attempts.at(-1), value: null });
+    await expect(removal).resolves.toBeNull();
+  } finally {
+    await coordinator.cancelBatch().catch(() => {});
+    await coordinator.call({ op: 'cancel', requestId: 'delete' }).catch(() => {});
+    await removal?.catch(() => {});
+  }
+});
+
+it('does not repeat a deletion that commits while a new import is asking it to pause', async () => {
+  const { host, child } = setup();
+  const started = Promise.withResolvers<string>();
+  child.postMessage.mockImplementation(m => {
+    if (m.op === 'remove-base') { started.resolve(m.id); return; }
+    if (m.cancel) return;
+    queueMicrotask(() => child.emit('message', { id: m.id, value: m.op === 'index' ? { documentId: 'new' } : null }));
+  });
+  const signal = new AbortController().signal;
+  const deleting = host.removeBase('target', signal);
+  const id = await started.promise;
+  const indexing = host.indexDocument({ documentId: 'new', baseId: 'keep', name: 'new.txt', bytes: new Uint8Array([1]) }, signal);
+  expect(child.postMessage).toHaveBeenCalledWith({ cancel: id });
+  child.emit('message', { id, value: null });
+  await expect(deleting).resolves.toBeNull();
+  await expect(indexing).resolves.toMatchObject({ documentId: 'new' });
+  expect(child.postMessage.mock.calls.map(([m]) => m.op).filter(Boolean)).toEqual(['remove-base', 'index']);
+});
+
+it('waits for a stalled erase worker to exit before indexing, then resumes deletion', async () => {
+  const { host, child: stalled } = setup();
+  await host.initialize();
+  const { child: replacement } = setup();
+  replacement.postMessage.mockImplementation(m => queueMicrotask(() => replacement.emit('message', { id: m.id, value: null })));
+  const signal = new AbortController().signal;
+  vi.useFakeTimers();
+  try {
+    const deleting = host.removeBase('target', signal);
+    const deleted = expect(deleting).resolves.toBeNull();
+    await vi.advanceTimersByTimeAsync(0);
+    const request = stalled.postMessage.mock.lastCall![0];
+    expect(request.op).toBe('remove-base');
+    const indexing = host.indexDocument({ documentId: 'new', baseId: 'keep', name: 'new.txt', bytes: new Uint8Array([1]) }, signal);
+    const indexed = expect(indexing).resolves.toBeNull();
+    await vi.advanceTimersByTimeAsync(9999);
+    expect(stalled.postMessage).toHaveBeenCalledWith({ cancel: request.id });
+    expect(stalled.kill).not.toHaveBeenCalled();
+    expect(replacement.postMessage).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    await Promise.all([indexed, deleted]);
+    expect(stalled.kill).toHaveBeenCalledOnce();
+    expect(replacement.postMessage.mock.calls.map(([m]) => m.op).filter(Boolean)).toEqual(['index', 'remove-base']);
+    expect(vi.getTimerCount()).toBe(0);
+  } finally { vi.useRealTimers(); }
+});
+
+it.each([false, true])('deletion resumes after retiring an unresponsive cancelled index writer, batch=%s', async (batch) => {
+  const { host, child: stalled } = setup();
+  stalled.postMessage.mockImplementation(m => {
+    if (m.init || m.op === 'begin-index-batch') {
+      queueMicrotask(() => stalled.emit('message', { id: m.id, value: null }));
+    } else if (m.op === 'index') {
+      queueMicrotask(() => stalled.emit('message', { id: m.id, started: true }));
+    }
+  });
+  const coordinator = new KnowledgeCoordinator(host, '/synthetic/models', vi.fn());
+  await host.initialize();
+  if (batch) await coordinator.call({ op: 'begin-index-batch', requestId: 'batch', baseId: 'target', documentIds: ['one', 'two'] });
+  const { child: replacement } = setup();
+  replacement.postMessage.mockImplementation(m => queueMicrotask(() => replacement.emit('message', { id: m.id, value: null })));
+  vi.useFakeTimers();
+  try {
+    const indexing = coordinator.call({
+      op: 'import', requestId: 'index', documentId: 'one', baseId: 'target', name: 'synthetic.md',
+      bytes: new Uint8Array([1]), ...(batch && { batchId: 'batch' }),
+    });
+    const cancelled = expect(indexing).rejects.toBeDefined();
+    await vi.advanceTimersByTimeAsync(0);
+    const indexRequest = stalled.postMessage.mock.lastCall![0];
+    expect(indexRequest.op).toBe('index');
+    const deleting = coordinator.call({ op: 'remove-base', requestId: 'delete', baseId: 'target' });
+    const deleted = expect(deleting).resolves.toBeNull();
+    await vi.advanceTimersByTimeAsync(9999);
+    expect(stalled.postMessage).toHaveBeenCalledWith({ cancel: indexRequest.id });
+    expect(stalled.kill).not.toHaveBeenCalled();
+    expect(replacement.postMessage).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    await Promise.all([cancelled, deleted]);
+    expect(stalled.kill).toHaveBeenCalledOnce();
+    expect(replacement.postMessage.mock.calls.map(([m]) => m.op).filter(Boolean))
+      .toEqual(batch ? ['finish-index-batch', 'remove-base'] : ['remove-base']);
+    expect(vi.getTimerCount()).toBe(0);
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 it('serves committed reads while a writer is still indexing and retires the extra reader afterwards', async () => {

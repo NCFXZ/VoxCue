@@ -12,7 +12,7 @@ ghcr.io/cirruslabs/macos-tahoe-base@sha256:65c3133a633fda8753cf1f71f2d55727792d5
 
 另一条路径是使用 Apple 官方目录中 `VirtualMac2,1` 的 [macOS 27.2.1 恢复镜像](https://updates.cdn-apple.com/2026FallFCS/c202a724-db7e-4d56-917b-110aa0226507/UniversalMac_27.2.1_26B131_Restore.ipsw)。将原名 IPSW 保存在 owner 临时根，使用 Tart 的 `create --from-ipsw` 调用 Apple 安装器，在新建的基线上安装系统。该文件为 25,595,954,706 字节，SHA-256 为 `233e85a09887579d47d0b195e7db72be7f204261059c6946f719acf6b300814f`。runner 在克隆前独立核对文件，启动后核对 guest build 为 `26B131`。
 
-macOS 27 宿主可使用 Tart 首启预配建立仅在来宾使用的临时管理员与自动登录。预配阶段使用仅宿主可达的网络，安装 Apple 签名 CLTools、固定 Node 和普通用户的 Tart vsock agent。随后重启核实 SIP、Gatekeeper 和工具版本，关机后再交给断网验收入口。
+macOS 27 宿主可使用 Tart 首启预配建立仅在来宾使用的临时管理员与自动登录。预配阶段安装 Apple 签名 CLTools、固定 Node 和普通用户的 Tart vsock agent。包级入口在断网副本内以 `sudo -n` 执行 `/sbin/ifconfig en0 inet 192.168.248.2 netmask 255.255.255.0 up`。使用该入口时，在自有来宾预配阶段用 `visudo` 核对只授权这条完整命令的规则。随后重启核实 SIP、Gatekeeper 和工具版本，关机后再交给断网验收入口。
 
 | 工具 | 固定版本与归档 | SHA-256 |
 | --- | --- | --- |
@@ -51,7 +51,7 @@ guest 还需在 `/opt/homebrew/bin/node` 准备与当前测试环境一致的 No
 node test/scripts/package-guest-smoke.mjs
 ```
 
-完整入口从 `macos/release/<版本>/` 读取正式 1.1.1、1.2.2、1.2.3、1.3.1 和 1.3.2 arm64 ZIP，按 `package-upgrade-baselines.mjs` 固定的摘要认证后复制到客机。也可通过 `VOXCUE_TEST_UPGRADE_ARCHIVES` 指定包含版本子目录的绝对路径。1.1.1 使用旧 v1 助手，其余使用 v11。GitHub 上已撤下 1.3.1，请使用保存的正式归档。
+完整入口从 `macos/release/<版本>/` 读取正式 1.1.1、1.2.2、1.2.3、1.3.1、1.3.2 和 1.3.3 arm64 ZIP，按 `package-upgrade-baselines.mjs` 固定的摘要认证后复制到客机。也可通过 `VOXCUE_TEST_UPGRADE_ARCHIVES` 指定包含版本子目录的绝对路径。1.1.1 使用旧 v1 助手，其余使用 v11。GitHub 上已撤下 1.3.1，请使用保存的正式归档。
 
 单独复测安装与覆盖升级时可传 `--install-only`。它执行正式安装包检查和所选归档版本的升级用例，并使用包内 Qwen 程序对合成音频做 CPU 转写。客机报告支持 Metal 时也执行 Metal 转写；缺少该能力时终端单列待验。镜像、来宾保护和临时资料校验与完整入口相同。
 
@@ -59,7 +59,7 @@ node test/scripts/package-guest-smoke.mjs
 
 需要在同一个干净客机串行复测以上两组时，同时传 `--install-only --runtime-only`。每组使用独立产品资料，结束时汇总失败项。
 
-仅复测升级可传 `--upgrades-only`。先检查最终安装包及历史 ZIP 的签名或摘要，再从最新的旧版开始验证。运行安装或升级验收时可以通过一个或多个 `--from=<版本>` 选择旧包，版本必须在固定摘要清单中。本次现行前序版本验收使用 `--from=1.3.2`。
+仅复测升级可传 `--upgrades-only`。先检查最终安装包及历史 ZIP 的签名或摘要，再从最新的旧版开始验证。运行安装或升级验收时可以通过一个或多个 `--from=<版本>` 选择旧包，版本必须在固定摘要清单中。1.3.5 的前序版本验收使用 `--from=1.3.3`。
 
 runner 仅分享白名单公开代码、依赖、模型和发行资产的只读临时输入；宿主 home、真实 Keychain、私有签名材料、账号、剪贴板、音频和 USB 均不共享。源依赖的编号副本只有在规范同名项存在时才跳过；代码通过普通归档在 guest 本地恢复，避免 virtiofs framework 链接问题。
 
@@ -79,7 +79,7 @@ GUI／原生／推理串行执行，并持续核对当前 UID 已登录且解锁
 
 `--screenshot-only` 是最终 ASAR 合成截图专项：连续编码、错误、取消、期限、Worker 退休和内存收敛；故障注入仅作用于测试宿主，产品不变。音频设备专项只可在独立 guest 使用固定虚拟设备及自有 aggregate，不采样宿主或物理硬件。参数成功或全零 PCM 不能证明音频权限已授权；AudioOnly 和 Screen＋Audio 状态通过正常 guest 系统 UI 建立，不改 TCC 数据库。
 
-首次麦克风权限用独立新 guest 的已验证虚拟输入和未修改的签名应用复验。进入本地账户，在面试设置点击「检查麦克风」，核对系统弹窗的应用名称。选择拒绝后，从应用打开麦克风隐私设置，核对 VoxCue 出现在列表且开关关闭。打开开关，按系统提示退出并重新打开应用，再检查「麦克风可用」。
+首次麦克风权限用独立新 guest 的已验证虚拟输入、合成账户和未修改的签名应用复验。在面试设置选定虚拟麦克风并打开「开始面试」弹窗，核对自动预检触发的系统授权提示及应用名称。选择拒绝后，从弹窗的「打开麦克风权限设置」进入系统设置，核对 VoxCue 出现在列表且开关关闭。开启后按系统提示重新打开应用，复查弹窗中的「麦克风」状态为「可用」。
 
 owner 只可运行 `package-smoke.mjs --static-only` 的零产品启动检查，读取 ZIP／DMG、签名、fuses、ASAR 和原生元数据；退出 2 表示动态覆盖未执行。产品 `--online`、AEC `--packaged` 和 `package-temporary-smoke.mjs` 已退役。发布后的匿名资产／清单回读不启动产品。
 

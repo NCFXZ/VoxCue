@@ -16,8 +16,8 @@ export function InputWave({ active = true, level }: { active?: boolean; level: n
       className="interview-readiness-level"
       style={{ '--input-level': Math.max(0.16, Math.sqrt(level / 100)) } as CSSProperties}
     >
-      {[0.88, 1, 0.92].map((height, index) => (
-        <i key={index} style={{ height: `${height * 100}%` }} />
+      {[55, 78, 100, 78, 55].map((height, index) => (
+        <i key={index} style={{ '--wave-height': `${height}%` } as CSSProperties} />
       ))}
     </span>
   );
@@ -72,7 +72,7 @@ export function InterviewReadiness({ device }: { device?: ReactNode }) {
           >
             <Loader size={14} />
           </span>
-          <InputWave active={status.kind === 'input'} level={status.level} />
+          {item !== 'model' && <InputWave active={status.kind === 'input'} level={status.level} />}
         </span>
         <span id={description} className="interview-badge-tooltip" role="tooltip">
           {t('{0}：{1}', [

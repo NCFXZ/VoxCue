@@ -122,6 +122,7 @@ async function copy(source, destination) {
 // .tools directory, environment file, Keychain, user profile or login state enters.
 for (const relative of [
   'shared/package.json',
+  'shared/public',
   'shared/scripts',
   'shared/src/services',
   'shared/electron/contracts',

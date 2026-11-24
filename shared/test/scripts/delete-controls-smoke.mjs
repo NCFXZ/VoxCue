@@ -367,7 +367,7 @@ try {
   await page.getByRole('button', { name: '移除附件 附件.txt', exact: true }).click();
   assert.equal(await page.locator('.chat-attachment').count(), 1);
   await second('附件：附件.txt').click();
-  assert.equal(await page.locator('.chat-attachment').count(), 0);
+  await page.locator('.chat-attachment').waitFor({ state: 'detached' });
   await page.getByRole('button', { name: '移除简历', exact: true }).click();
   assert.equal(await page.locator('.resume-chip').count(), 1);
   await second('简历原件：旧简历.txt').click();

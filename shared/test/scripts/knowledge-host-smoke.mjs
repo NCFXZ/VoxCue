@@ -78,7 +78,7 @@ async function runInElectron() {
     assert.throws(attempt, /Offline desktop regression forbids network access/);
   app.disableHardwareAcceleration();
   await app.whenReady();
-  const { KnowledgeHost } = require(config.host);
+  const { LibraryKnowledgeHost } = require(config.host);
   const { KnowledgeError, knowledgeErrorCodes } = require(config.errors);
   const { RagChatService } = require(config.rag);
   const originalFork = utilityProcess.fork;
@@ -89,7 +89,7 @@ async function runInElectron() {
   };
   const hosts = [];
   const createHost = () => {
-    const host = new KnowledgeHost(
+    const host = new LibraryKnowledgeHost(
       path.join(config.root, 'database-' + hosts.length),
       path.join(config.root, 'unused-synthetic-model'),
     );
@@ -293,7 +293,7 @@ await writeFile(
   JSON.stringify({
     root: testRoot,
     fixture,
-    host: path.join(base, 'backend/knowledge/host.js'),
+    host: path.join(base, 'backend/knowledge/workerHost.js'),
     service: path.join(base, 'backend/knowledge/service.js'),
     errors: path.join(base, 'backend/knowledge/errors.js'),
     processFile: path.join(base, 'backend/knowledge/process.js'),

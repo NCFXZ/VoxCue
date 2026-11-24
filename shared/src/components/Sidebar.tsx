@@ -27,6 +27,7 @@ import { SidebarUpdate } from './SidebarUpdate';
 import { InterviewReveal } from './InterviewReveal';
 import { SelectionLabel } from './SelectionLabel';
 import { SidebarSelectionIndicator } from './SidebarSelectionIndicator';
+import { AnimatedCollection } from './ui/AnimatedCollection';
 function ConversationDot({ streaming, unread }: { streaming: boolean; unread?: boolean }) {
   return (
     <span className="conversation-indicator" aria-hidden="true">
@@ -100,6 +101,7 @@ export function Sidebar({
           size="icon"
           onClick={onCollapse}
           aria-label={collapsed ? t('展开侧栏') : t('收起侧栏')}
+          aria-expanded={!collapsed}
         >
           {collapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}
         </Button>
@@ -136,54 +138,57 @@ export function Sidebar({
           <SelectionLabel>{t('知识库')}</SelectionLabel>
         </button>
       </nav>
-      {!collapsed && (
-        <div className="sidebar-conversations">
-          <p className="section-caption">{t('聊天记录')}</p>
-          {preparation.conversations
-            .slice()
-            .reverse()
-            .map((conversation) => {
-              const streaming = conversation.messages.some((message) => message.status === 'streaming');
-              return (
-                <div
-                  key={conversation.id}
-                  className={`conversation-row ${preparation.activeConversation === conversation.id && page === 'preparation' ? 'active' : ''}`}
+      <AnimatedCollection
+        className="sidebar-conversations"
+        label={t('聊天记录')}
+        enabled={preparation.chatsReady}
+        before={<p className="section-caption" aria-hidden="true">{t('聊天记录')}</p>}
+      >
+        {preparation.conversations
+          .slice()
+          .reverse()
+          .map((conversation) => {
+            const streaming = conversation.messages.some((message) => message.status === 'streaming');
+            return (
+              <div
+                key={conversation.id}
+                data-motion-revision={JSON.stringify([conversation.title, !conversation.messages.length])}
+                className={`conversation-row ${preparation.activeConversation === conversation.id && page === 'preparation' ? 'active' : ''}`}
+              >
+                <button
+                  className="conversation"
+                  aria-current={
+                    preparation.activeConversation === conversation.id && page === 'preparation'
+                      ? 'page'
+                      : undefined
+                  }
+                  aria-label={`${conversation.title}${streaming ? t('，正在回复') : conversation.unread ? t('，回复完成，尚未查看') : ''}${!conversation.messages.length ? t('，未发送草稿') : ''}`}
+                  onClick={() => onNavigate('preparation', () => preparation.selectConversation(conversation.id))}
                 >
-                  <button
-                    className="conversation"
-                    aria-current={
-                      preparation.activeConversation === conversation.id && page === 'preparation'
-                        ? 'page'
-                        : undefined
-                    }
-                    aria-label={`${conversation.title}${streaming ? t('，正在回复') : conversation.unread ? t('，回复完成，尚未查看') : ''}${!conversation.messages.length ? t('，未发送草稿') : ''}`}
-                    onClick={() => onNavigate('preparation', () => preparation.selectConversation(conversation.id))}
-                  >
-                    <ConversationDot streaming={streaming} unread={conversation.unread} />
-                    <span>
-                      {conversation.title}
-                      {!conversation.messages.length && <small>{t(' · 草稿')}</small>}
-                    </span>
-                  </button>
-                  <ConfirmDeleteButton
-                    iconOnly
-                    compact
-                    className="conversation-delete"
-                    target={t('对话：') + conversation.title}
-                    revision={conversation.id + ':' + conversation.title}
-                    active={!collapsed}
-                    aria-label={t('删除对话：') + conversation.title}
-                    onConfirm={() => {
-                      const active = preparation.activeConversation === conversation.id;
-                      preparation.deleteConversation(conversation.id);
-                      if (active) onNavigate('preparation');
-                    }}
-                  />
-                </div>
-              );
-            })}
-        </div>
-      )}
+                  <ConversationDot streaming={streaming} unread={conversation.unread} />
+                  <span className="conversation-title">
+                    {conversation.title}
+                    {!conversation.messages.length && <small>{t(' · 草稿')}</small>}
+                  </span>
+                </button>
+                <ConfirmDeleteButton
+                  iconOnly
+                  compact
+                  className="conversation-delete"
+                  target={t('对话：') + conversation.title}
+                  revision={conversation.id + ':' + conversation.title}
+                  active={!collapsed}
+                  aria-label={t('删除对话：') + conversation.title}
+                  onConfirm={() => {
+                    const active = preparation.activeConversation === conversation.id;
+                    preparation.deleteConversation(conversation.id);
+                    if (active) onNavigate('preparation');
+                  }}
+                />
+              </div>
+            );
+          })}
+      </AnimatedCollection>
       <div className="sidebar-bottom">
         <div className="local-note">
           <div className="sidebar-status-row">

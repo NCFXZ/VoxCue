@@ -31,7 +31,10 @@ await writeFile(
 const {app,dialog}=require('electron');dialog.showErrorBox=(title,message)=>{console.error(title,message);app.exit(91);};process.on('uncaughtException',error=>{console.error(error.stack);app.exit(92);});const fs=require('node:fs/promises');const path=require('node:path');const assert=require('node:assert/strict');
 const config=require('./config.json');app.setPath('userData',path.join(config.output,'userData'));
 app.whenReady().then(async()=>{
- const {KnowledgeHost}=require(config.host);const {KnowledgeError}=require(path.join(config.root,'dist-electron/shared/electron/backend/knowledge/errors.js'));const events=[];
+ const {KnowledgeHost}=require(config.host);
+ const {LibraryKnowledgeHost}=require(path.join(path.dirname(config.host),'workerHost.js'));
+ const {libraryKey}=require(path.join(path.dirname(config.host),'libraryLayout.js'));
+ const {KnowledgeError}=require(path.join(config.root,'dist-electron/shared/electron/backend/knowledge/errors.js'));const events=[];
  const {profileDirectory}=require(path.join(config.root,'dist-electron/shared/electron/accountProfilePaths.js'));
  const storage=path.join(profileDirectory(path.join(config.output,'userData'),'demo'),'knowledge-v1');
  const platform=require(path.join(config.root,'dist-electron/shared/electron/platform/index.js')).selectDesktopPlatform();
@@ -41,7 +44,9 @@ app.whenReady().then(async()=>{
   assert.ok(lease,'Long account fixture must exercise the Windows native path');
   aliases.push(lease.path);return lease;
  });
- const openHost=()=>new KnowledgeHost(storage,config.model,e=>events.push(e),prepare);
+ let onProgress;
+ const publish=e=>{events.push(e);onProgress?.(e);};
+ const openHost=()=>new LibraryKnowledgeHost(storage,config.model,publish,prepare);
  let host=openHost();
  const signal=()=>new AbortController().signal;const input=(id,text)=>({documentId:id,baseId:'smoke',name:id+'.md',bytes:Buffer.from(text)});
  const results=[];const fixtures=require(path.join(config.root,'../shared/test/scripts/rag-fixtures.cjs'));
@@ -127,11 +132,155 @@ app.whenReady().then(async()=>{
   assert.ok((await host.search(config.replacement,5,'keyword',signal())).length);
   await host.removeDocument('ledger',signal());assert.equal((await host.listDocuments()).length,0);
   assert.equal((await host.search(question,5,'hybrid',signal())).length,0);
+  const {KnowledgeCoordinator}=require(path.join(config.root,'dist-electron/shared/electron/application/knowledge.js'));
+  const coordinator=new KnowledgeCoordinator(host,config.model,()=>{});
+  const interrupted={...input('in-progress',body),baseId:'interrupted',batchId:'interrupted-batch'};
+  const retained={...input('retained-index','Synthetic unrelated retained text.'),baseId:'keep'};
+  await host.indexDocument(retained,signal());
+  await coordinator.call({op:'begin-index-batch',requestId:interrupted.batchId,baseId:interrupted.baseId,documentIds:[interrupted.documentId,'next-file']});
+  let deleting;
+  onProgress=event=>{
+    coordinator.progress(event);
+    if(!deleting&&event.documentId===interrupted.documentId&&event.phase==='embedding'){
+      deleting=coordinator.call({op:'remove-base',requestId:'delete-in-progress',baseId:interrupted.baseId});
+      void deleting.catch(()=>{});
+    }
+  };
+  await assert.rejects(coordinator.call({op:'import',requestId:'edit-in-progress',...interrupted}));
+  assert.ok(deleting,'Issued deletion while the utility was embedding');
+  await deleting;
+  onProgress=undefined;
+  assert.deepEqual((await host.listDocuments()).map(doc=>doc.documentId),[retained.documentId]);
+  assert.equal((await host.search(config.marker,5,'keyword',signal(),'interrupted')).length,0);
+  assert.ok((await host.search('unrelated retained',5,'keyword',signal(),'keep')).length);
+  results.push({deletion:'cancelled a live index batch and preserved the unrelated library'});
+  const target = { ...input('target-original', 'Synthetic target-only marker ' + config.marker), baseId: 'target' };
+  await host.indexDocument(target, signal());
+  const batch = 'keep-during-removal';
+  const preserved = { ...input('kept-during-removal', 'Synthetic concurrent indexing marker ' + config.replacement), baseId: 'keep' };
+  await coordinator.call({ op: 'begin-index-batch', requestId: batch, baseId: 'keep', documentIds: [retained.documentId, preserved.documentId] });
+  let removed = false;
+  const removal = coordinator.call({ op: 'remove-base', requestId: 'remove-other-library', baseId: 'target' })
+    .then(() => { removed = true; });
+  void removal.catch(() => {});
+  for (const doc of [retained, preserved])
+    await coordinator.call({ op: 'import', requestId: 'index-' + doc.documentId, batchId: batch, ...doc });
+  assert.equal(removed, false, 'Deletion is still pending as the unrelated batch publishes');
+  await coordinator.call({ op: 'finish-index-batch', requestId: 'commit-keep-batch', batchId: batch, commit: true });
+  await removal;
+  assert.deepEqual((await host.listDocuments()).map(doc => doc.documentId).sort(), [retained.documentId, preserved.documentId].sort());
+  assert.equal((await host.search(config.marker, 5, 'keyword', signal(), 'target')).length, 0);
+  assert.equal((await host.search(config.replacement, 5, 'keyword', signal(), 'keep'))[0]?.documentId, preserved.documentId);
+  results.push({ deletion: 'unrelated batch published successfully during a pending library erasure' });
+  await host.indexDocument(target, signal());
+  const beforeSplit = (await host.search(config.replacement, 5, 'keyword', signal(), 'keep'))[0];
+  const originals = path.join(config.output, 'originals');
+  await fs.mkdir(originals);
+  for (const doc of [retained, preserved, target]) await fs.writeFile(path.join(originals, doc.name), doc.bytes);
   await host.close();
-  const missing=new KnowledgeHost(path.join(config.output,'missing-db'),path.join(config.output,'missing-model'));
+  // The layout switch discards generated shared data before the model starts a rebuild.
+  host = new KnowledgeHost(storage, path.join(config.output, 'missing-model'), publish, prepare);
+  const migrating = performance.now();
+  await host.initialize();
+  const migrationMs = Math.round(performance.now() - migrating);
+  assert.deepEqual(await host.listDocuments(), []);
+  const aFolder = path.join(storage, 'libraries', libraryKey('target'));
+  const bFolder = path.join(storage, 'libraries', libraryKey('keep'));
+  await assert.rejects(fs.lstat(path.join(storage, 'catalog.json')), { code: 'ENOENT' });
+  assert.deepEqual((await fs.readdir(path.join(storage, 'lance'))).filter(name => name.endsWith('.lance')), []);
+  await host.close();
+
+  const rebuild = async doc => {
+    const bytes = await fs.readFile(path.join(originals, doc.name));
+    assert.deepEqual(bytes, doc.bytes);
+    return host.indexDocument({ ...doc, bytes }, signal());
+  };
+  const progressStart = events.length;
+  host = new KnowledgeHost(storage, config.model, publish, prepare);
+  await rebuild(retained);
+  await host.close();
+  host = new KnowledgeHost(storage, config.model, publish, prepare);
+  assert.deepEqual((await host.listDocuments()).map(doc => doc.documentId), [retained.documentId]);
+  await rebuild(preserved);
+  await rebuild(target);
+  assert.deepEqual((await host.listDocuments()).map(doc => doc.documentId).sort(), [retained.documentId, preserved.documentId, target.documentId].sort());
+  assert.ok(events.slice(progressStart).some(event => event.documentId === preserved.documentId && event.phase === 'embedding' && event.completed > 0));
+  assert.ok(events.slice(progressStart).some(event => event.documentId === preserved.documentId && event.phase === 'ready'));
+  for (const folder of [aFolder, bFolder])
+    assert.ok((await fs.readdir(path.join(folder, 'lance'))).some(name => name.endsWith('.lance')));
+  const rebuiltHit = (await host.search(config.replacement, 5, 'keyword', signal(), 'keep'))[0];
+  assert.equal(rebuiltHit.itemId, beforeSplit.itemId);
+  assert.notEqual(rebuiltHit.revision, beforeSplit.revision);
+  assert.equal(await host.getItem(beforeSplit.itemId, signal(), beforeSplit), null);
+  const rebuiltCitation = await host.getItem(rebuiltHit.itemId, signal(), rebuiltHit);
+  assert.ok(rebuiltCitation.rootContent.includes(config.replacement));
+  results.push({ rebuiltLibraries: 'Retired shared files, indexed the same originals with native progress, and continued incomplete work after restarting', migrationMs });
+
+  // Gate only the target directory's disk cleanup. The tested app code and both
+  // database workers run normally, including while the deletion is still pending.
+  const independent = new KnowledgeCoordinator(host, config.model, () => {});
+  onProgress = event => independent.progress(event);
+  const retired = path.join(storage, 'removed-libraries', libraryKey('target'), 'index');
+  const reachedDisk = Promise.withResolvers(), releaseDisk = Promise.withResolvers();
+  const originalRm = fs.rm;
+  let removedOnDisk = false, deletionMs;
+  fs.rm = async (file, options) => {
+    if (file === retired) {
+      reachedDisk.resolve();
+      await releaseDisk.promise;
+      const started = performance.now();
+      await originalRm(file, options);
+      deletionMs = Math.round(performance.now() - started);
+      return;
+    }
+    return originalRm(file, options);
+  };
+  const deletionStarted = performance.now();
+  const erasing = independent.call({op:'remove-base', requestId:'parallel-delete', baseId:'target'})
+    .then(() => { removedOnDisk = true; });
+  let detachMs;
+  try {
+    const detached = await Promise.race([reachedDisk.promise.then(() => true), erasing.then(() => false)]);
+    detachMs = Math.round(performance.now() - deletionStarted);
+    assert.equal(detached, true);
+    await assert.rejects(fs.lstat(aFolder), { code: 'ENOENT' });
+    assert.ok((await fs.lstat(retired)).isDirectory());
+    const imported = { ...input('parallel-first', 'A concurrent synthetic marker ' + config.replacement), baseId: 'keep' };
+    await independent.call({ op: 'import', requestId: 'parallel-first-request', ...imported });
+    assert.equal(removedOnDisk, false, 'The retained library committed while target cleanup was pending');
+    assert.ok((await host.listDocuments()).some(doc => doc.documentId === imported.documentId && doc.available));
+
+    const openBatch = 'parallel-keep-batch';
+    const draft = { ...input('parallel-draft', 'An unpublished synthetic draft.'), baseId: 'keep', batchId: openBatch };
+    await independent.call({ op: 'begin-index-batch', requestId: openBatch, baseId: 'keep', documentIds: [draft.documentId, 'parallel-last'] });
+    await independent.call({ op: 'import', requestId: 'parallel-draft-request', ...draft });
+    releaseDisk.resolve();
+    await erasing;
+    assert.equal(removedOnDisk, true, 'Target cleanup completed while the retained batch was still open');
+    await assert.rejects(fs.lstat(retired), { code: 'ENOENT' });
+    assert.equal((await host.listDocuments()).some(doc => doc.documentId === draft.documentId), false);
+    const last = { ...input('parallel-last', 'Synthetic end of retained batch.'), baseId: 'keep', batchId: openBatch };
+    await independent.call({ op: 'import', requestId: 'parallel-last-request', ...last });
+    await independent.call({ op: 'finish-index-batch', requestId: 'parallel-batch-commit', batchId: openBatch, commit: true });
+    assert.ok((await host.listDocuments()).some(doc => doc.documentId === last.documentId && doc.available));
+    assert.deepEqual(await host.search(config.marker, 5, 'hybrid', signal(), 'target'), []);
+    assert.ok((await host.search(config.replacement, 5, 'hybrid', signal(), 'keep')).some(hit => hit.documentId === imported.documentId));
+  } finally {
+    releaseDisk.resolve();
+    await erasing.catch(() => {});
+    fs.rm = originalRm;
+    onProgress = undefined;
+  }
+  await host.close();
+  host = new KnowledgeHost(storage, config.model, publish, prepare);
+  assert.ok((await host.listDocuments()).every(doc => doc.baseId === 'keep'));
+  assert.deepEqual(await host.getItem(rebuiltHit.itemId, signal(), rebuiltHit), rebuiltCitation);
+  results.push({ isolatedLibraries: 'Deletion and indexing progressed independently; rebuilt citations survived restart', detachMs, deletionMs });
+  await host.close();
+  const missing=new LibraryKnowledgeHost(path.join(config.output,'missing-db'),path.join(config.output,'missing-model'));
   try{await assert.rejects(missing.indexDocument(a,signal()),e=>e instanceof KnowledgeError&&e.code==='not_ready'&&/知识库检索未安装/.test(e.message));}finally{await missing.close();}
   const damagedRoot=path.join(config.output,'damaged-catalog');await fs.mkdir(damagedRoot);await fs.writeFile(path.join(damagedRoot,'catalog.json'),'null');
-  const damaged=new KnowledgeHost(damagedRoot,config.model);try{await assert.rejects(damaged.initialize(),e=>e instanceof KnowledgeError&&e.code==='configuration');assert.equal(await fs.readFile(path.join(damagedRoot,'catalog.json'),'utf8'),'null');}finally{await damaged.close();}
+  const damaged=new LibraryKnowledgeHost(damagedRoot,config.model);try{await assert.rejects(damaged.initialize(),e=>e instanceof KnowledgeError&&e.code==='configuration');assert.equal(await fs.readFile(path.join(damagedRoot,'catalog.json'),'utf8'),'null');}finally{await damaged.close();}
   console.log(JSON.stringify({status:'passed',node:process.version,electron:process.versions.electron,results,events:events.map(e=>({phase:e.phase,completed:e.completed,total:e.total})),longAnswerChunks:first.chunkCount},null,2));app.exit(0);
  }catch(error){await host.close().catch(()=>{});console.error(JSON.stringify({status:'failed',error:String(error),stack:error.stack},null,2));app.exit(1);}
 });`,
@@ -161,4 +310,4 @@ const code = await new Promise((resolve, reject) => {
   });
 });
 console.log(output);
-if (code) process.exitCode = 1;
+if (code !== 0) process.exitCode = 1;

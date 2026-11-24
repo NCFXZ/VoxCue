@@ -48,7 +48,7 @@ try {
   if (native.granted) assert.equal(native.requestResult, true);
   checks.push('实际 arm64 Node-API 在 Electron 主进程读取屏幕授权；未授权时不自动请求');
   await installUiAccount(app, { speech: true, components: true });
-  await app.evaluate(({ app, desktopCapturer, systemPreferences }) => {
+  await app.evaluate(({ app, desktopCapturer, shell, systemPreferences }) => {
     if (!app.getPath('userData').includes('/test/results/screen-permission-'))
       throw Error('Non-test profile');
     const require = process
@@ -65,8 +65,12 @@ try {
       grantOnRequest: true,
       requests: 0,
       settings: 0,
+      audioSettings: [],
       captures: 0,
       preparations: 0,
+    };
+    shell.openExternal = async (url) => {
+      globalThis.screenFixture.audioSettings.push(url);
     };
     const mediaStatus = systemPreferences.getMediaAccessStatus.bind(systemPreferences);
     systemPreferences.getMediaAccessStatus = (kind) =>
@@ -105,11 +109,12 @@ try {
       devices: inventory,
       checks: options.sources.map((source) => ({
         source,
-        status:
-          globalThis.screenFixture.audioDenied && source === 'microphone' ? 'denied' : 'granted',
+        status: globalThis.screenFixture.audioDenied ? 'denied' : 'granted',
         message:
-          globalThis.screenFixture.audioDenied && source === 'microphone'
-            ? '所选合成麦克风未获授权，请检查音频权限设置。'.repeat(5)
+          globalThis.screenFixture.audioDenied
+            ? source === 'microphone'
+              ? '所选合成麦克风未获授权，请检查音频权限设置。'.repeat(5)
+              : '所选合成系统音频未获授权。'
             : source === 'system'
               ? '系统音频可用'
               : '麦克风可用',
@@ -268,13 +273,15 @@ try {
   );
   assert.equal(await app.evaluate(() => globalThis.screenFixture.requests), 2);
   assert.equal(await app.evaluate(() => globalThis.screenFixture.captures), 0);
+  await dialog.getByRole('button', { name: '取消', exact: true }).click();
+  await dialog.waitFor({ state: 'hidden' });
   await app.evaluate(({ BrowserWindow }) => {
     globalThis.screenFixture.audioDenied = true;
     BrowserWindow.getAllWindows()
       .find((window) => window.isVisible())
       .setContentSize(960, 680);
   });
-  await dialog.getByRole('button', { name: '重新检查', exact: true }).click();
+  await start();
   await dialog
     .getByText('所选合成麦克风未获授权，请检查音频权限设置。'.repeat(5), { exact: true })
     .waitFor();
@@ -282,6 +289,18 @@ try {
     await dialog.getByRole('button', { name: '确认开始', exact: true }).isDisabled(),
     true,
   );
+  await dialog.getByRole('button', { name: '打开麦克风权限设置', exact: true }).click();
+  await dialog.getByRole('button', { name: '打开系统音频权限设置', exact: true }).click();
+  const audioSettings = await app.evaluate(async () => {
+    const { audioSettings } = globalThis.screenFixture;
+    const deadline = Date.now() + 3000;
+    while (audioSettings.length < 2 && Date.now() < deadline)
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    return audioSettings;
+  });
+  assert.equal(audioSettings.length, 2);
+  assert.match(audioSettings[0], /Privacy_Microphone$/);
+  assert.match(audioSettings[1], /Privacy_ScreenCapture$/);
   assert.equal(
     await dialog.locator('.interview-access').evaluate(
       (section) =>
@@ -293,7 +312,13 @@ try {
     ),
     true,
   );
+  await app.evaluate(() => {
+    globalThis.screenFixture.audioDenied = false;
+  });
+  await dialog.getByRole('button', { name: '重新检查', exact: true }).click();
+  await dialog.getByRole('button', { name: '确认开始', exact: true, disabled: false }).waitFor();
   assert.deepEqual(errors, []);
+  checks.push('开场自动检查麦克风；拒绝后分别打开对应的音频设置并可重新检查');
   checks.push('返回后刷新/撤销可见，未生效可打开固定设置；非法 IPC 被拒绝，无屏幕捕获');
   checks.push(
     '合成 not-required 状态不显示申请按钮或错误授权提示，开场仍可继续；不替代 Windows 原生验收',

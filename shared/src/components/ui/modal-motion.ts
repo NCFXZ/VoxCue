@@ -6,6 +6,14 @@ export function clearModalExit() {
   removeExit?.();
 }
 
+export function modalExitRemaining(scope: Document) {
+  const exit = scope.querySelector('[data-modal-exit]');
+  const fade = exit?.getAnimations().find((animation) =>
+    animation instanceof CSSAnimation && animation.animationName === 'modal-fade-out');
+  const end = Number(fade?.effect?.getComputedTiming().endTime ?? 0);
+  return Math.max(0, end - Number(fade?.currentTime ?? 0));
+}
+
 // Business state and the native modal lock are released immediately. A manual
 // popover keeps only the inert visual in the top layer while it fades away.
 export function captureModalExit(dialog: HTMLDialogElement) {

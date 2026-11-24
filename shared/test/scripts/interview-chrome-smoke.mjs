@@ -413,10 +413,13 @@ try {
   const before = await answerScroll.evaluate((e) => e.scrollTop);
   for (const rows of [1, 2, 3, 4, 5, 6, 5, 2, 1]) {
     await editor.fill(Array.from({ length: rows }, () => '逐行面试输入').join('\n'));
-    const size = await editor.evaluate((node) => ({
-      height: node.getBoundingClientRect().height,
-      line: parseFloat(getComputedStyle(node).lineHeight),
-    }));
+    const size = await editor.evaluate(async (node) => {
+      await Promise.all(node.getAnimations().map((animation) => animation.finished));
+      return {
+        height: node.getBoundingClientRect().height,
+        line: parseFloat(getComputedStyle(node).lineHeight),
+      };
+    });
     assert.ok(Math.abs(size.height - rows * size.line) <= 1, JSON.stringify({ rows, ...size }));
   }
   await editor.fill('中文组合中的面试草稿');

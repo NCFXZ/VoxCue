@@ -1,4 +1,5 @@
-import { assertLibrariesWritable, deactivateOriginal, holdOriginalReplacements, removeIndexedOriginals, hasKnowledgeEngine, knowledgeCall, markBaseRemoval, pendingBaseRemovals } from './knowledgeIndex';
+import { assertDocumentsWritable, assertLibrariesWritable, deactivateOriginal, holdOriginalReplacements, removeIndexedOriginals, hasKnowledgeEngine, knowledgeCall, markBaseRemoval, pendingBaseRemovals } from './knowledgeIndex';
+import { finishKnowledgeRemoval, knowledgeRemovalPending, loadKnowledgeRemovals, pendingKnowledgeRemovals, saveKnowledgeRemoval, type KnowledgeRemoval } from './knowledgeRemovals';
 import { CloudDataConflict, localChanged } from './localChanges';
 import { applyHistoryChanges, historyChanged, historyRepository, historyStoreNames, type HistoryChange, type HistorySummary } from './history';
 import { sameValue } from './storedEqual';
@@ -12,13 +13,19 @@ export type { KnowledgeBase, LocalDocument, KnowledgeManagementService } from '.
 export const documentAccept = knowledgeDocumentAccept;
 let importing = false;
 const baseRemovals = new Map<string, Promise<void>>();
-export async function recoverKnowledgeBaseRemovals() {
-  let failure: unknown;
-  for (const id of pendingBaseRemovals()) {
-    try { await localKnowledge.deleteBase(id); }
-    catch (error) { failure ??= error; }
-  }
-  if (failure) throw failure;
+// Only IDs minted by this renderer can prove there is no earlier local index.
+// A library restored by sync, imported from another profile or loaded on startup
+// may have historical revisions even when its current document list is empty.
+const newEmptyLibraries = new Set<string>();
+export function recordLibraryOriginal(baseId: string) {
+  newEmptyLibraries.delete(baseId);
+}
+export function listKnowledgeRemovals(): KnowledgeRemoval[] {
+  return [
+    ...pendingKnowledgeRemovals(),
+    ...pendingBaseRemovals().filter(id => !knowledgeRemovalPending('base:' + id))
+      .map(baseId => ({ baseId, revision: null })),
+  ];
 }
 export function validateFiles(files: Pick<File, 'name' | 'size'>[]) {
   if (!files.length) throw new Error('请选择文件。');
@@ -43,10 +50,12 @@ async function transaction<T>(
   mode: IDBTransactionMode,
   operation: (tx: IDBTransaction, result: (value: T) => void, abort: (reason: unknown) => void) => void,
   existingOnly = false,
+  durability: IDBTransactionDurability = 'default',
 ): Promise<T> {
+  await loadKnowledgeRemovals();
   const db = await openDocumentsDatabase(existingOnly);
   return new Promise((resolve, reject) => {
-    const tx = db.transaction(stores, mode);
+    const tx = db.transaction(stores, mode, { durability });
     let value: T;
     let reason: unknown;
     tx.oncomplete = () => {
@@ -95,6 +104,11 @@ export function readKnowledgeDocumentNames(ids: readonly string[]) {
     }
   });
 }
+function baseWrite(base: KnowledgeBase) {
+  const name = base.name.trim();
+  if (!name || name.length > 60) throw Error('名称需要 1–60 个字符。');
+  return { ...base, name, localRevision: crypto.randomUUID() };
+}
 export const localKnowledge: KnowledgeManagementService = {
   listBases: () =>
     transaction(['bases'], 'readonly', (tx, result) => {
@@ -104,16 +118,19 @@ export const localKnowledge: KnowledgeManagementService = {
           request.result.sort((a: KnowledgeBase, b: KnowledgeBase) => b.createdAt - a.createdAt),
         );
     }),
+  async createBase(name) {
+    const base = baseWrite({ id: crypto.randomUUID(), name, createdAt: Date.now() });
+    await transaction(['bases'], 'readwrite', (tx) => {
+      tx.objectStore('bases').add(base);
+    });
+    newEmptyLibraries.add(base.id);
+    localChanged('knowledgebase', ['base:' + base.id]);
+    return base;
+  },
   async saveBase(base) {
     await transaction(['bases'], 'readwrite', (tx) => {
       assertLibrariesWritable([base.id]);
-      if (!base.name.trim() || base.name.trim().length > 60)
-        throw new Error('名称需要 1–60 个字符。');
-      tx.objectStore('bases').put({
-        ...base,
-        name: base.name.trim(),
-        localRevision: crypto.randomUUID(),
-      });
+      tx.objectStore('bases').put(baseWrite(base));
     });
     localChanged('knowledgebase', ['base:' + base.id]);
   },
@@ -122,9 +139,11 @@ export const localKnowledge: KnowledgeManagementService = {
     if (active) return active;
     const changed = ['base:' + id];
     const work = removeIndexedOriginals({ baseId: id }, async () => {
-      const native = id !== 'personal-resume' && (hasKnowledgeEngine() || pendingBaseRemovals().includes(id));
+      const legacy = id !== 'personal-resume' && pendingBaseRemovals().includes(id);
+      const native = id !== 'personal-resume' && (hasKnowledgeEngine() || legacy);
+      const markLegacy = native && !knowledgeRemovalPending('base:' + id);
       if (native) {
-        markBaseRemoval(id, true);
+        if (markLegacy) markBaseRemoval(id, true);
         await knowledgeCall({ op: 'remove-base', baseId: id, requestId: crypto.randomUUID() });
       } else if (id === 'personal-resume') {
         for (const doc of await localKnowledge.listDocuments(id)) await deactivateOriginal(doc.id, true);
@@ -142,8 +161,9 @@ export const localKnowledge: KnowledgeManagementService = {
             cursor.continue();
           }
         };
-      });
-      if (native) markBaseRemoval(id, false);
+      }, false, 'strict');
+      if (legacy || markLegacy) markBaseRemoval(id, false);
+      recordLibraryOriginal(id);
       if (id === 'personal-resume') localChanged('profile', ['resume:main']);
       else localChanged('knowledgebase', changed);
     }).finally(() => baseRemovals.delete(id));
@@ -174,6 +194,7 @@ export const localKnowledge: KnowledgeManagementService = {
           ? old
           : old.filter((doc) => files.some((file) => file.name === doc.name));
       const versions = new Map(replaced.map(doc => [doc.id, documentRevision(doc)]));
+      assertDocumentsWritable(versions.keys());
       release = holdOriginalReplacements(replaced.map(doc => doc.id));
       for (const doc of replaced) await deactivateOriginal(doc.id);
       const changed = ['base:' + baseId];
@@ -183,15 +204,18 @@ export const localKnowledge: KnowledgeManagementService = {
           // Re-importing a file with the same name replaces that file, rather than duplicating it.
           const request = docs.index('baseId').getAll(baseId);
           request.onsuccess = () => {
-            try { assertLibrariesWritable([baseId]); }
-            catch (error) { abort(error); return; }
             const existing: LocalDocument[] = request.result;
             const targets = baseId === 'personal-resume' ? existing : existing.filter(doc => files.some(file => file.name === doc.name));
+            try {
+              assertLibrariesWritable([baseId]);
+              assertDocumentsWritable(targets.map(doc => doc.id));
+            } catch (error) { abort(error); return; }
             if (targets.length !== versions.size || targets.some(doc => versions.get(doc.id) !== documentRevision(doc))) {
               abort(Error('同步期间本地文件已更改。'));
               return;
             }
             const names = new Map(existing.map((doc) => [doc.name, doc.id]));
+            recordLibraryOriginal(baseId);
             if (baseId === 'personal-resume') for (const doc of existing) docs.delete(doc.id);
             for (const file of files) {
               const id = names.get(file.name) ?? crypto.randomUUID();
@@ -234,11 +258,63 @@ export const localKnowledge: KnowledgeManagementService = {
       await deleteOriginalBackups('id', id);
       await transaction(['documents'], 'readwrite', (tx) => {
         tx.objectStore('documents').delete(id);
-      });
+      }, false, 'strict');
     });
     if (doc) localChanged('knowledgebase', ['base:' + doc.baseId, 'file:' + id]);
   },
 };
+
+async function reviewedRemoval(removal: KnowledgeRemoval) {
+  const original = removal.documentId
+    ? await readKnowledgeOriginal('documents', removal.documentId)
+    : await readKnowledgeOriginal('bases', removal.baseId);
+  return {
+    exists: !!original,
+    matches: !!original && documentRevision(original) === removal.revision &&
+      (!('baseId' in original) || original.baseId === removal.baseId),
+  };
+}
+
+export function queueKnowledgeRemoval(removal: KnowledgeRemoval) {
+  if (pendingBaseRemovals().includes(removal.baseId)) return Promise.resolve(false);
+  return saveKnowledgeRemoval(removal, async () => {
+    const { baseId, documentId, revision } = removal;
+    if (!documentId && newEmptyLibraries.has(baseId)) {
+      const removed = await transaction<boolean>(['bases', 'documents'], 'readwrite', (tx, result) => {
+        const bases = tx.objectStore('bases');
+        const base = bases.get(baseId);
+        const documents = tx.objectStore('documents').index('baseId').count(baseId);
+        documents.onsuccess = () => {
+          const empty = newEmptyLibraries.has(baseId) && documents.result === 0 &&
+            documentRevision(base.result) === revision;
+          if (empty) bases.delete(baseId);
+          result(empty);
+        };
+      }, false, 'strict');
+      if (removed) {
+        recordLibraryOriginal(baseId);
+        localChanged('knowledgebase', ['base:' + baseId]);
+        return true;
+      }
+    }
+    if (!(await reviewedRemoval(removal)).matches) throw Error('资料已更改，请重新确认删除。');
+    return false;
+  });
+}
+
+export async function completeKnowledgeRemoval(removal: KnowledgeRemoval) {
+  if (!hasKnowledgeEngine()) throw Error('知识库引擎不可用，请在桌面应用中重试。');
+  // Older clients recorded whole-library intents before touching the index.
+  if (removal.revision === null) return localKnowledge.deleteBase(removal.baseId);
+  const original = await reviewedRemoval(removal);
+  if (original.exists && !original.matches) {
+    await finishKnowledgeRemoval(removal);
+    throw Error('资料已更改，请重新确认删除。');
+  }
+  if (removal.documentId) await localKnowledge.deleteDocument(removal.documentId);
+  else await localKnowledge.deleteBase(removal.baseId);
+  await finishKnowledgeRemoval(removal);
+}
 
 async function deleteOriginalBackups(index: 'id' | 'baseId', id: string) {
   if (
@@ -250,7 +326,7 @@ async function deleteOriginalBackups(index: 'id' | 'baseId', id: string) {
   const db = await openOriginalBackups('indexed', failure);
   try {
     await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction('versions', 'readwrite');
+      const tx = db.transaction('versions', 'readwrite', { durability: 'strict' });
       const versions = tx.objectStore('versions');
       const request = versions.index(index).openKeyCursor(id);
       request.onsuccess = () => {
@@ -376,9 +452,14 @@ export function mergeImportedOriginals(
 ) {
   return updateMigrationOriginals((baseStore, docStore, current) => {
     verify(current);
+    assertLibrariesWritable([...bases.map(base => base.id), ...documents.map(doc => doc.baseId)]);
+    assertDocumentsWritable(documents.map(doc => doc.id));
     for (const base of bases) baseStore.put({ ...base, localRevision: crypto.randomUUID() });
     const originals = documents.map(doc => ({ ...doc, localRevision: crypto.randomUUID() }));
-    for (const doc of originals) docStore.put(doc);
+    for (const doc of originals) {
+      recordLibraryOriginal(doc.baseId);
+      docStore.put(doc);
+    }
     return originals;
   }, publish, guard, false, history, readOriginals);
 }
@@ -396,6 +477,8 @@ export async function removeMovedOriginals(
   }
   await updateMigrationOriginals((bases, docs, current) => {
     verify(current);
+    assertLibrariesWritable([...baseIds, ...current.documents.filter(doc => documentIds.has(doc.id)).map(doc => doc.baseId)]);
+    assertDocumentsWritable(documentIds);
     for (const id of baseIds) bases.delete(id);
     for (const id of documentIds) docs.delete(id);
   }, publish, () => {}, true, history, !!(baseIds.size || documentIds.size));
@@ -420,6 +503,7 @@ export async function removeSyncedLibraryOriginals(root: string, revisions: Read
         try {
           guard();
           assertLibrariesWritable([baseId]);
+          assertDocumentsWritable(files.map(key => key.slice(5)));
           const docs: LocalDocument[] = members.result;
           if (docs.length + (base.result ? 1 : 0) !== revisions.size ||
               (base.result && revisions.get(root) !== documentRevision(base.result)) ||
@@ -455,6 +539,7 @@ export async function removeSyncedKnowledgeOriginal(
   const verify = (original: KnowledgeBase | LocalDocument | undefined, count: number) => {
     guard();
     assertLibrariesWritable([baseId]);
+    if (!base) assertDocumentsWritable([id]);
     if (!original || (kind === 'resume') !== (baseId === 'personal-resume') ||
         (kind === 'resume' && count !== 1) || documentRevision(original) !== expectedRevision ||
         (base ? (id !== baseId || count !== 0) : (!('baseId' in original) || original.baseId !== baseId)))
@@ -513,7 +598,9 @@ export async function restoreSyncedDocument(
   expectedRevision: string | null,
   guard = () => {},
 ) {
+  await loadKnowledgeRemovals();
   assertLibrariesWritable([doc.baseId]);
+  assertDocumentsWritable([doc.id]);
   const resume = doc.baseId === 'personal-resume';
   const previous = await readKnowledgeOriginal('documents', doc.id);
   const ownershipConflict = () => new CloudDataConflict('文件标识已用于其他资料，已保留两端版本。');
@@ -538,6 +625,7 @@ export async function restoreSyncedDocument(
           try {
             guard();
             assertLibrariesWritable(scopes);
+            assertDocumentsWritable([doc.id]);
             if (parent && parent.result === undefined) throw Error('知识库无效。');
             if (Array.isArray(current.result)
               ? claimed?.result !== undefined && !current.result.some(item => item.id === doc.id)
@@ -553,6 +641,7 @@ export async function restoreSyncedDocument(
           }
           for (const item of replaced) store.delete(item.id);
           const committed = { ...doc, localRevision: crypto.randomUUID() };
+          recordLibraryOriginal(committed.baseId);
           store.put(committed);
           result(committed);
         };

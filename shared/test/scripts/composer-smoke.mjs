@@ -535,11 +535,11 @@ try {
   });
   assert.ok(confirmFits, 'The expanded confirmation label fits inside its button');
   await confirmRemove.click();
-  assert.equal(await page.locator('.chat-attachment').count(), 2);
+  assert.equal(await page.locator('.chat-attachments > .chat-attachment').count(), 2);
   await page.screenshot({});
   await page.getByRole('button', { name: '发送消息', exact: true }).click();
   await page.locator('.chat-answer').getByText('尚未联网检索', { exact: false }).waitFor();
-  assert.equal(await page.locator('.chat-attachment').count(), 0);
+  assert.equal(await page.locator('.chat-attachments > .chat-attachment').count(), 0);
   await page.locator('.message-options').getByText('附件：project.md').waitFor();
   assert.equal(
     await page.locator('.message-options').getByText('思考：高', { exact: false }).count(),
@@ -556,7 +556,7 @@ try {
   });
   await page.locator('.chat-attachment').getByText('follow-up.txt', { exact: false }).waitFor();
   assert.equal(
-    await page.locator('.chat-attachment').count(),
+    await page.locator('.chat-attachments > .chat-attachment').count(),
     1,
     'Bubbling through chat column must add the file once',
   );
@@ -602,7 +602,7 @@ try {
     .getByRole('alert')
     .getByText('读取文件期间已切换对话，请在当前对话重新拖入文件。', { exact: true })
     .waitFor();
-  assert.equal(await page.locator('.chat-attachment').count(), 0);
+  assert.equal(await page.locator('.chat-attachments > .chat-attachment').count(), 0);
   for (const event of ['dragleave', 'blur', 'dragend']) {
     await page.locator('.welcome').evaluate((element) => {
       const transfer = new DataTransfer();

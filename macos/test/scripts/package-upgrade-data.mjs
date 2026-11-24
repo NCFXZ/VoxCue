@@ -25,7 +25,7 @@ import os from 'node:os';
 import assert from 'node:assert/strict';
 
 const targetVersion = workspace.platformRequire('./package.json').version;
-const usesCurrentProfile = (version) => ['1.3.1', '1.3.2', targetVersion].includes(version);
+const usesCurrentProfile = (version) => ['1.3.1', '1.3.2', '1.3.3', targetVersion].includes(version);
 const run = (command, args) => {
   const result = spawnSync(command, args, { encoding: 'utf8', timeout: 120000 });
   if (result.error || result.status !== 0)
@@ -482,10 +482,8 @@ export async function verifyPreviousVersionData({
       ? before
       : { ...before, bindings: { ...before.bindings, 'toggle-shortcut-help': 'Control+Shift+/' } };
     const migratedRevision = await checkIndex(current, oldOriginal, targetVersion);
-    if (currentProfile)
-      assert.equal(migratedRevision, oldRevision, 'A compatible index must retain its citation revision');
-    else
-      assert.notEqual(migratedRevision, oldRevision, 'The previous index must be rebuilt from its retained original');
+    // The pinned upgrade baselines all predate per-library index storage.
+    assert.notEqual(migratedRevision, oldRevision, 'The shared index must be rebuilt from its retained original');
     await current.getByRole('button', { name: '面试记录', exact: true }).click();
     await current.getByText(record.title, { exact: true }).waitFor();
     assert.deepEqual(await snapshot(current), migrated);

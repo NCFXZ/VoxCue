@@ -136,12 +136,23 @@ const summarizeFrames = (frames) => ({
   first: frames[0],
   last: frames.at(-1),
 });
-const startSelectionFrames = (page) =>
-  page.evaluate(() => {
+const startSelectionFrames = (page, trackControls = false) =>
+  page.evaluate((trackControls) => {
     const frames = [];
+    const sidebar = document.querySelector('.sidebar');
+    const controls = trackControls
+      ? [...document.querySelectorAll('.sidebar-toggle-button, .sidebar .nav-item > [data-ui-icon], .sidebar .avatar')]
+      : [];
+    const labels = trackControls
+      ? [...sidebar.querySelectorAll('.nav-item > span:not(.nav-create-symbol), .conversation-title, .user-info strong')]
+      : [];
+    const conversations = trackControls ? [...sidebar.querySelectorAll('.conversation-row')] : [];
+    const motionElements = trackControls
+      ? [sidebar, ...sidebar.querySelectorAll('.sidebar-heading, .sidebar-toggle-button, .nav-item, .section-caption, .conversation, .user-button, .user-button > svg'), ...conversations, ...labels]
+      : [];
     let frame;
+    let afterLayout;
     const sample = () => {
-      const sidebar = document.querySelector('.sidebar');
       const markers = sidebar.querySelectorAll('.sidebar-selection-indicator');
       const marker = markers[0];
       if (!marker) return;
@@ -164,6 +175,39 @@ const startSelectionFrames = (page) =>
         top: rect.top,
         width: rect.width,
         height: rect.height,
+        controls: controls.map((node) => {
+          const box = node.getBoundingClientRect();
+          return { x: box.left + box.width / 2, y: box.top + box.height / 2 };
+        }),
+        chats: conversations.map((node) => {
+          const row = node.getBoundingClientRect();
+          const dot = node.querySelector('.conversation-dot').getBoundingClientRect();
+          return {
+            left: row.left,
+            width: row.width,
+            centerY: row.top + row.height / 2,
+            dotX: dot.left + dot.width / 2,
+            dotY: dot.top + dot.height / 2,
+          };
+        }),
+        sidebarWidth: trackControls ? sidebar.getBoundingClientRect().width : undefined,
+        labels: labels.map((node) => {
+          const style = getComputedStyle(node);
+          const bounds = node.getBoundingClientRect();
+          const panel = sidebar.getBoundingClientRect();
+          const clip = node.closest('.nav-item, .sidebar-conversations, .user-button').getBoundingClientRect();
+          return {
+            width: bounds.width,
+            visible: style.visibility === 'visible',
+            opacity: Number(style.opacity),
+            fits: bounds.left >= Math.max(panel.left, clip.left) - 0.5 &&
+              bounds.right <= Math.min(panel.right, clip.right) + 0.5,
+          };
+        }),
+        easedTransitions: motionElements.flatMap((node) => node.getAnimations()
+          .filter((animation) => animation.transitionProperty && animation.effect.getTiming().duration > 0)
+          .map(({ effect }) => [effect.getTiming().easing, effect.getKeyframes()[0]?.easing]
+            .some((easing) => easing && easing !== 'linear'))),
         linear: motion
           ? Number(motion.currentTime) / Number(motion.effect.getTiming().duration)
           : null,
@@ -179,18 +223,22 @@ const startSelectionFrames = (page) =>
       });
     };
     const tick = () => {
-      sample();
+      // A layout frame includes the marker update delivered by ResizeObserver.
+      if (trackControls) afterLayout = setTimeout(sample, 0);
+      else sample();
       frame = requestAnimationFrame(tick);
     };
-    tick();
+    sample();
+    frame = requestAnimationFrame(tick);
     window.sidebarSelectionFrames = {
       frames,
       stop: () => {
+        clearTimeout(afterLayout);
         sample();
         cancelAnimationFrame(frame);
       },
     };
-  });
+  }, trackControls);
 const finishSelectionFrames = async (page) => {
   await page.evaluate(
     () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
@@ -277,9 +325,70 @@ const assertSelectionSlide = (frames, name) => {
       name + ': movement progresses smoothly toward its actual row',
     );
 };
+const assertSidebarMotion = (frames, name) => {
+  assertSelectionGeometry(frames, name);
+  assert.ok(frames.every((frame) => frame.visible === 'true' && frame.opacity === 1),
+    name + ': the selected chat stays visible');
+  const easing = frames.flatMap((frame) => frame.easedTransitions);
+  assert.ok(easing.length > 0 && easing.every(Boolean), name + ': the recorded transitions use nonlinear easing');
+  const first = frames[0].controls;
+  const last = frames.at(-1).controls;
+  assert.equal(first.length, 5);
+  for (const [index, start] of first.entries()) {
+    const dx = last[index].x - start.x;
+    const dy = last[index].y - start.y;
+    const distance = dx * dx + dy * dy;
+    assert.ok(distance > 1, `${name}: control ${index} has distinct endpoints`);
+    const progress = frames.map(({ controls }) =>
+      ((controls[index].x - start.x) * dx + (controls[index].y - start.y) * dy) / distance,
+    );
+    assert.ok(progress.filter((value) => value > 0.02 && value < 0.98).length > 1,
+      `${name}: control ${index} visits actual intermediate positions`);
+    assert.ok(progress.every((value, frame) => frame === 0 ||
+      (value + 0.02 >= progress[frame - 1] && value >= -0.02 && value <= 1.02)),
+      `${name}: control ${index} moves smoothly toward its destination`);
+  }
+  const startFrame = frames[0];
+  const endFrame = frames.at(-1);
+  for (const [index, start] of startFrame.chats.entries()) {
+    const end = endFrame.chats[index];
+    const delta = end.centerY - start.centerY;
+    const distance = Math.abs(delta);
+    const progress = frames.map(({ chats }) =>
+      (chats[index].centerY - start.centerY) * (delta < 0 ? -1 : 1),
+    );
+    assert.ok(
+      progress.every((value, frame) => value >= -0.25 && value <= distance + 0.25 &&
+        (frame === 0 || value + 0.25 >= progress[frame - 1])),
+      `${name}: conversation ${index} moves vertically without overshooting or reversing (${progress.join(', ')})`,
+    );
+    assert.ok(distance < 1 || progress.some(value => value > 0.25 && value < distance - 0.25),
+      `${name}: conversation ${index} visits an intermediate vertical position`);
+    for (const frame of frames) {
+      const progress = (frame.sidebarWidth - startFrame.sidebarWidth) /
+        (endFrame.sidebarWidth - startFrame.sidebarWidth);
+      for (const key of ['left', 'width', 'dotX']) {
+        const expected = start[key] + (end[key] - start[key]) * progress;
+        assert.ok(Math.abs(frame.chats[index][key] - expected) < 0.5,
+          `${name}: conversation ${index} ${key} moves with the sidebar
+  at width ${frame.sidebarWidth}: ${frame.chats[index][key]} (expected ${expected})`);
+      }
+      assert.ok(Math.abs(frame.chats[index].dotY - frame.chats[index].centerY) < 0.5,
+        `${name}: conversation ${index} dot stays vertically centered`);
+    }
+  }
+  for (const frame of frames) {
+    assert.ok(
+      Math.abs(frame.left - frame.target.left) < 0.5 && Math.abs(frame.top - frame.target.top) < 0.5,
+      `${name}: selection bar (${frame.left}, ${frame.top}) tracks its row (${frame.target.left}, ${frame.target.top})`,
+    );
+  }
+};
 try {
   await installUiAccount(app, { speech: true, components: true });
   const login = await app.firstWindow();
+  await login.getByRole('heading', { name: '登录 VoxCue', exact: true }).waitFor();
+  await login.waitForFunction(() => document.visibilityState === 'visible');
   const page = await connectUiAccount(app, login);
   page.setDefaultTimeout(20000);
   const errors = [];
@@ -567,7 +676,7 @@ try {
     reversal: summarizeFrames(reversalFrames),
     viewportWidths,
   });
-  const titles = ['侧栏合成对话甲', '侧栏合成对话乙'];
+  const titles = ['侧栏合成对话甲', '侧栏合成对话乙 用于检查长标题淡入时的省略号'];
   const conversation = (title) => page.locator('.conversation-row').filter({ hasText: title });
   const mountedConversations = [];
   let newConversationFrames;
@@ -622,14 +731,67 @@ try {
   assert.equal(selectedConversation.opacity, 1);
   assert(Math.abs(selectedConversation.left - 3) < 0.5);
   assert(Math.abs(selectedConversation.centerOffset) < 0.5);
-  await startSelectionFrames(page);
+  await startSelectionFrames(page, true);
   await page.getByRole('button', { name: '收起侧栏', exact: true }).click();
   const collapseConversation = await finishSelectionFrames(page);
-  assertSelectionFade(collapseConversation, 1, 0, 'Collapsing hides selected conversation');
-  await startSelectionFrames(page);
+  assertSidebarMotion(collapseConversation, 'Collapsing the sidebar');
+  const compactChats = page.locator('.sidebar.collapsed .sidebar-conversations');
+  for (const title of titles) await compactChats.getByRole('button', { name: title, exact: true }).waitFor();
+  assert.equal(await compactChats.locator('.section-caption').isVisible(), false);
+  assert.equal(await compactChats.evaluate((node) => node.scrollWidth <= node.clientWidth), true);
+  const compactLayout = await compactChats.evaluate((section) => {
+    const nav = section.closest('.sidebar').querySelector('.nav-item');
+    const { width, height, x } = nav.getBoundingClientRect();
+    const radius = getComputedStyle(nav).borderRadius;
+    const divider = getComputedStyle(section, '::before');
+    return {
+      divider: Math.abs(parseFloat(divider.width) - width) < 1 / 32 &&
+        Math.abs(parseFloat(divider.height) - 1) < 1 / 32 && divider.opacity === '1',
+      alignedDots: [...section.querySelectorAll('.conversation-row')].every((row) => {
+        const { x: left, y: top, width: rowWidth, height: rowHeight } = row.getBoundingClientRect();
+        const dots = row.querySelectorAll('.conversation-dot');
+        const dot = dots[0].getBoundingClientRect();
+        return dots.length === 1 && rowWidth === width && rowHeight === height &&
+          Math.abs(left - x) < 0.5 && getComputedStyle(row).borderRadius === radius &&
+          Math.abs(dot.x + dot.width / 2 - (left + width / 2)) < 0.5 &&
+          Math.abs(dot.y + dot.height / 2 - (top + height / 2)) < 0.5 &&
+          getComputedStyle(row.querySelector('.conversation-title')).visibility === 'hidden';
+      }),
+    };
+  });
+  assert.deepEqual(compactLayout, { divider: true, alignedDots: true });
+  await compactChats.getByRole('button', { name: titles[0], exact: true }).press('Enter');
+  await page.locator('.chat-message.user').getByText(titles[0], { exact: true }).waitFor();
+  await settle(page);
+  assert.equal(await compactChats.getByRole('button', { name: titles[0], exact: true }).getAttribute('aria-current'), 'page');
+  await startSelectionFrames(page, true);
   await page.getByRole('button', { name: '展开侧栏', exact: true }).click();
   const expandConversation = await finishSelectionFrames(page);
-  assertSelectionFade(expandConversation, 0, 1, 'Expanding restores selected conversation');
+  assertSidebarMotion(expandConversation, 'Expanding the sidebar');
+  const expanded = expandConversation.at(-1);
+  assert.equal(expanded.labels.length, 3 + titles.length + 1, 'Track navigation labels, chat titles and the email');
+  const fadeStart = (index) => expandConversation.findIndex(({ labels }) =>
+    labels[index].visible && labels[index].opacity > 0.1);
+  const navigationStart = fadeStart(0);
+  const chatStart = fadeStart(3);
+  const accountStart = fadeStart(expanded.labels.length - 1);
+  assert.ok(navigationStart >= 0 && navigationStart < chatStart && chatStart < accountStart,
+    'Navigation, chat titles and the email start fading in at staggered times');
+  for (const [index, label] of expanded.labels.entries()) {
+    const painted = expandConversation.map((frame) => ({ ...frame.labels[index], sidebarWidth: frame.sidebarWidth }))
+      .filter(({ visible, opacity }) => visible && opacity > 0);
+    assert.ok(label.visible && label.opacity === 1);
+    assert.ok(expandConversation.some((frame) => frame.sidebarWidth < expanded.sidebarWidth - 1 &&
+      frame.labels[index].visible && frame.labels[index].opacity > 0.05 && frame.labels[index].opacity < 0.95),
+      'The label fades in during expansion');
+    assert.ok(painted.some(({ opacity }) => opacity < 0.25) &&
+      painted.some(({ opacity }) => opacity >= 0.25 && opacity < 0.75) &&
+      painted.some(({ opacity }) => opacity >= 0.75 && opacity < 0.98),
+    `Label ${index} visibly fades through low, medium and high opacity`);
+    const clipped = painted.filter(({ width, fits }) => !fits || Math.abs(width - label.width) >= 0.5);
+    assert.deepEqual(clipped, [], `Label ${index} fits at its expanded width throughout the fade`);
+  }
+  assert.equal(await conversation(titles[0]).locator('.conversation-title').isVisible(), true);
   await startSelectionFrames(page);
   await navigation.getByRole('button', { name: '新对话', exact: true }).click();
   const deselectConversation = await finishSelectionFrames(page);
@@ -920,10 +1082,20 @@ try {
   await page.getByRole('button', { name: '保存', exact: true }).click();
   const base = page.getByRole('dialog', { name: baseName, exact: true });
   await base.waitFor();
-  const headerFits = await base
+  await settle(page);
+  const header = await base
     .locator('.dialog-heading')
-    .evaluate((element) => element.scrollWidth <= element.clientWidth + 1);
-  check('long-dialog-title', headerFits);
+    .evaluate((element) => {
+      // The decorative backdrop extends across the reserved scrollbar gutter.
+      const bounds = element.getBoundingClientRect();
+      const [title, actions] = Array.from(element.children, (child) => child.getBoundingClientRect());
+      return {
+        left: title.left - bounds.left,
+        right: bounds.right - actions.right,
+        gap: actions.left - title.right,
+      };
+    });
+  check('long-dialog-title', header.left >= 0 && header.right >= 0 && header.gap >= 0, header);
   await base.screenshot({ animations: 'disabled' });
   await captureRequested(base, 'long-knowledge-title');
   await base.getByRole('button', { name: '关闭对话框', exact: true }).click();

@@ -43,6 +43,7 @@ const shared = [
   'profile-ui',
   'profile-selection',
   'knowledge',
+  'knowledge-removal',
   'rag-ui',
   'rag-core',
   'knowledge-host',

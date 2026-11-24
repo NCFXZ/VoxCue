@@ -7,7 +7,7 @@ import workspace from '../../../shared/scripts/workspace.mjs';
 
 // Published, unchanged arm64 ZIPs. These pins authenticate the old bytes before
 // staging or extracting them; a rebuilt old version is not an upgrade baseline.
-// Sources: NCFXZ/VoxCue-releases v1.1.1 and NCFXZ/VoxCue v1.2.2 through v1.3.2.
+// Sources: NCFXZ/VoxCue-releases v1.1.1 and NCFXZ/VoxCue v1.2.2 through v1.3.3.
 const baselines = {
   '1.1.1': {
     size: 608058445,
@@ -28,6 +28,10 @@ const baselines = {
   '1.3.2': {
     size: 625430056,
     sha256: '339d9486fe052630a38fc31225f9b02956b06cad7468c2dc9d00a36b81002e00',
+  },
+  '1.3.3': {
+    size: 625462195,
+    sha256: 'ea80725bb940314b1696e88c0953621dd269938afe4215fc7360a6ca6477b9a6',
   },
 };
 export const upgradeBaselineVersions = Object.freeze(Object.keys(baselines));

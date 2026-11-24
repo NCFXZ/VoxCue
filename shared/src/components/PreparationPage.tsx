@@ -238,6 +238,16 @@ export function PreparationPage({
   const [interviewConfiguration, setInterviewConfiguration] = useState(
     defaultInterviewConfiguration,
   );
+  const { microphone, system, sources } = interviewConfiguration.options;
+  const microphoneEnabled = sources.includes('microphone');
+  const systemAudioEnabled = sources.includes('system');
+  const audioSettingsChecks = checkingAccess
+    ? []
+    : (accessReport?.checks.filter(({ source, status }) =>
+        source === 'microphone'
+          ? status === 'denied'
+          : window.desktop?.platform === 'macos' && status !== 'granted',
+      ) ?? []);
   const previewEnabled = confirmInterview && !checkingAccess && !openingInterview && !interviewError;
   const canPreview = (source: 'microphone' | 'system') => previewEnabled &&
     !!accessReport?.checks.some(check => check.source === source && check.status === 'granted');
@@ -468,7 +478,12 @@ export function PreparationPage({
       } else setInterviewKnowledgeName('不使用知识库');
       if (!current()) return;
       const [report] = await Promise.all([
-        window.desktop!.checkInterviewAccess(configuration),
+        window.desktop!.checkInterviewAccess({
+          ...defaultInterviewConfiguration(),
+          inputMode: configuration.inputMode,
+          options: configuration.options,
+          knowledgeBaseId: configuration.knowledgeBaseId,
+        }),
         useShortcuts.getState().call({ op: 'check' }),
       ]);
       if (!current()) return;
@@ -485,23 +500,29 @@ export function PreparationPage({
   };
   useEffect(() => {
     if (!confirmInterview) return;
-    ++accessAttempt.current;
-    setAccessReport(null);
-    const configuration = startConfiguration();
-    configuration.profile = interviewConfiguration.profile;
-    configuration.knowledgeBaseId = interviewConfiguration.knowledgeBaseId;
-    setInterviewConfiguration(configuration);
-    if (connection.live && !connection.loading && connection.models.length)
-      void checkAccess(configuration);
-    else setCheckingAccess(false);
+    setInterviewConfiguration((current) => ({
+      ...startConfiguration(),
+      profile: current.profile,
+      knowledgeBaseId: current.knowledgeBaseId,
+    }));
   }, [
     confirmInterview,
     interviewSettings.inputMode,
     interviewSettings.configuration.modelId,
     interviewSettings.configuration.effort,
     connection.live,
-    connection.loading,
     connection.models,
+  ]);
+  useEffect(() => {
+    if (confirmInterview) void checkAccess(interviewConfiguration);
+  }, [
+    confirmInterview,
+    interviewConfiguration.inputMode,
+    interviewConfiguration.knowledgeBaseId,
+    microphone,
+    system,
+    microphoneEnabled,
+    systemAudioEnabled,
   ]);
   useEffect(() => {
     if (!confirmInterview || !window.desktop?.screenCapturePermissionSupported) return;
@@ -768,35 +789,26 @@ export function PreparationPage({
                 {preview.error ? <p className="interview-access-detail danger-text" role="alert">{t(preview.error)}</p> : null}
               </InterviewReveal>
               <InterviewReveal>
-                {!checkingAccess &&
-                  accessReport?.checks.some(
-                    (check) =>
-                      (check.source === 'microphone' && check.status === 'denied') ||
-                      (window.desktop?.platform === 'macos' &&
-                        check.source === 'system' &&
-                        check.status !== 'granted'),
-                  ) ? (
+                {audioSettingsChecks.length > 0 ? (
                   <div className="interview-access-actions">
-                    <Button
-                      variant="outline"
-                      onClick={() =>
-                        void window
-                          .desktop!.openMicrophoneSettings(
-                            window.desktop?.platform === 'macos'
-                              ? accessReport?.checks.find((check) => check.status !== 'granted')
-                                  ?.source
-                              : undefined,
-                          )
-                          .catch(() =>
-                            setInterviewError('无法打开系统设置，请手动打开音频隐私设置。'),
-                          )
-                      }
-                    >
-                      <Settings size={16} />
-                      {window.desktop?.platform === 'macos'
-                        ? t('打开音频权限设置')
-                        : t('打开麦克风权限设置')}
-                    </Button>
+                    {audioSettingsChecks.map(({ source }) => (
+                      <Button
+                        key={source}
+                        variant="outline"
+                        onClick={() => {
+                          const attempt = accessAttempt.current;
+                          void window.desktop!.openMicrophoneSettings(source).catch(() => {
+                            if (attempt === accessAttempt.current)
+                              setInterviewError('无法打开系统设置，请手动打开音频隐私设置。');
+                          });
+                        }}
+                      >
+                        <Settings size={16} />
+                        {source === 'microphone'
+                          ? t('打开麦克风权限设置')
+                          : t('打开系统音频权限设置')}
+                      </Button>
+                    ))}
                   </div>
                 ) : null}
               </InterviewReveal>

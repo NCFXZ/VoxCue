@@ -411,6 +411,12 @@ try {
     return result.ok && result.value.documents.length === total;
   }, beforeRelease.length);
   assert.deepEqual(await app.evaluate(() => globalThis.cloudRestoreUi.imports), beforeRelease);
+  // Start reading after the initial dialog/list layout has finished expanding.
+  await reading.evaluate(async (dialog) => {
+    await Promise.allSettled(dialog.getAnimations({ subtree: true })
+      .filter((animation) => animation.effect.getTiming().iterations !== Infinity)
+      .map((animation) => animation.finished));
+  });
   const scroll = reading.locator('.dialog-scroll');
   await scroll.evaluate((node) => { node.scrollTop = (node.scrollHeight - node.clientHeight) / 2; });
   const readingPosition = (node) => {

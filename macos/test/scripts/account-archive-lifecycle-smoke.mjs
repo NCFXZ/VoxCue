@@ -4,6 +4,7 @@ import {
   installUiAccount,
   closeUiApp,
 } from '../../../shared/test/scripts/install-ui-account.mjs';
+import { offlineElectronEntry } from '../../../shared/test/scripts/offline-electron-entry.mjs';
 import { holdDesktopAwake, requireUnlockedDesktop } from './desktop-session.mjs';
 import path from 'node:path';
 import { writeFile, readFile, stat } from 'node:fs/promises';
@@ -13,7 +14,7 @@ const releaseDesktop = holdDesktopAwake();
 const destination = path.join(testRoot, 'existing.zip');
 await writeFile(destination, 'preserve');
 const app = await electron.launch({
-  args: ['.'],
+  args: [await offlineElectronEntry()],
   env: {
     ...process.env,
     COPILOT_TEST_USER_DATA: path.join(testRoot, 'profile'),

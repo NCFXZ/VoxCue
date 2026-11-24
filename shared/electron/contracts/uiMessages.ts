@@ -791,8 +791,6 @@ export const uiMessages: Readonly<Record<string, string>> = {
   '默认系统音频设备不可用，请在面试设置中重新选择。':
     'The default output device is unavailable. Choose another in Interview settings.',
   麦克风可用: 'Microphone available',
-  麦克风权限: 'Microphone permission',
-  检查麦克风: 'Check microphone',
   系统音频可用: 'System audio available',
   '麦克风访问被拒绝，请检查 Windows 隐私设置和设备权限。':
     'Microphone access was denied. Check Windows privacy settings and device permissions.',
@@ -1835,8 +1833,8 @@ export const uiMessages: Readonly<Record<string, string>> = {
     'You can continue with audio only. Screenshots need permission.',
   '无法打开系统设置，请手动打开音频隐私设置。':
     'Could not open system settings. Open audio privacy settings manually.',
-  打开音频权限设置: 'Open audio permissions',
   打开麦克风权限设置: 'Open microphone permissions',
+  打开系统音频权限设置: 'Open system audio permissions',
   '读取文件期间已切换对话，请在当前对话重新拖入文件。':
     'The conversation changed while loading files. Drop them into the current chat again.',
   '读取文件失败。': 'Could not read the files.',
@@ -2331,6 +2329,11 @@ export const uiMessages: Readonly<Record<string, string>> = {
   '无法处理截图，请重试。': 'Could not process the screenshot. Please try again.',
   '截图处理超时，请重试。': 'Screenshot processing timed out. Please try again.',
   '原件备份删除失败，请重试。': 'Could not delete the original-file backups. Please try again.',
+  '索引取消后未退出，知识库进程已重新启动。': 'The indexing process did not stop after cancellation. The knowledge engine has restarted.',
+  '重试删除': 'Retry deletion',
+  '无法保存或读取后台删除任务，请重试。': 'Could not save or read pending deletions. Please try again.',
+  '资料已更改，请重新确认删除。': 'The item changed. Confirm deletion again.',
+  '这个文档正在删除，暂时无法替换。': 'This document is being deleted and cannot be replaced yet.',
   '同一批次包含同名文件，请分批导入。':
     'This batch contains files with the same name. Import them separately.',
   '知识库引擎不可用，请在桌面应用中重试。':

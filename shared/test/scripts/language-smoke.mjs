@@ -389,11 +389,11 @@ try {
   await audit('Live interview settings', floating);
   await floating.keyboard.press('Escape');
   await floating.getByRole('button', { name: 'End interview', exact: true }).click();
-  await floating.waitForFunction(
-    () => document.querySelector('.floating-end').getBoundingClientRect().width >= 135,
-  );
+  const confirmEnd = floating.getByRole('button', { name: 'Confirm end interview', exact: true });
+  await confirmEnd.waitFor();
   await audit('End confirmation', floating);
-  const endPadding = await floating.locator('.floating-end').evaluate((button) => {
+  const endPadding = await confirmEnd.evaluate(async (button) => {
+    await Promise.allSettled(button.getAnimations({ subtree: true }).map(animation => animation.finished));
     const outer = button.getBoundingClientRect();
     const inner = button.querySelector('.button-morph-expanded').getBoundingClientRect();
     return { left: inner.left - outer.left, right: outer.right - inner.right };
@@ -410,7 +410,7 @@ try {
     );
   await Promise.all([
     floating.waitForEvent('close'),
-    floating.getByRole('button', { name: 'Confirm end interview', exact: true }).click(),
+    confirmEnd.click(),
   ]);
   await page.getByRole('button', { name: 'Interview history', exact: true }).click();
   await audit('History');

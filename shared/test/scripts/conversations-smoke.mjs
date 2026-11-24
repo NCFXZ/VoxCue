@@ -94,6 +94,7 @@ try {
   await row.hover();
   await row.getByRole('button', { name: '删除对话：第一条对话', exact: true }).click();
   await row.getByRole('button', { name: '确认删除：对话：第一条对话', exact: true }).click();
+  await row.waitFor({ state: 'detached' });
   assert.equal(await page.locator('.conversation-row').count(), 1);
   assert.equal(await page.locator('.chat-message').count(), 0);
   const remaining = page.locator('.conversation-row');
@@ -103,6 +104,7 @@ try {
   await remaining.getByRole('button', { name: '删除对话：第二条对话', exact: true }).click();
   await page.screenshot({});
   await remaining.getByRole('button', { name: '确认删除：对话：第二条对话', exact: true }).click();
+  await remaining.waitFor({ state: 'detached' });
   assert.equal(await page.locator('.conversation-row').count(), 0);
 
   const chat = page.locator('.chat-scroll');

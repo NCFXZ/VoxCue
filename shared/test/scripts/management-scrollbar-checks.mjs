@@ -188,18 +188,19 @@ export async function checkManagementScrollbars({ app, main, directory }) {
     );
     await main.waitForTimeout(240);
     const sidebar = main.locator('.sidebar');
-    const contentWidth = 210;
+    const navWidth = (width) => main.waitForFunction((width) =>
+      Math.abs(document.querySelector('.sidebar nav').getBoundingClientRect().width - width) < 0.1, width);
+    await navWidth(210);
     await main.getByRole('button', { name: '收起侧栏', exact: true }).click();
-    await main.waitForTimeout(230);
+    await main.waitForFunction(() => {
+      const node = document.querySelector('.sidebar.collapsed');
+      if (!node) return false;
+      const width = parseFloat(getComputedStyle(node).getPropertyValue('--sidebar-collapsed-width'));
+      return Math.abs(node.getBoundingClientRect().width - width) < 0.1;
+    });
     await main.getByRole('button', { name: '展开侧栏', exact: true }).click();
-    await main.waitForTimeout(70);
-    assert.ok(
-      Math.abs(
-        (await sidebar.locator('nav').evaluate((node) => node.getBoundingClientRect().width)) -
-          contentWidth,
-      ) < 0.1,
-    );
-    await main.waitForTimeout(180);
+    await navWidth(210);
+    await settle();
     const layout = await sidebar.evaluate((node) => {
       const parent = node.getBoundingClientRect();
       return [

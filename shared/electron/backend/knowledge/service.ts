@@ -621,6 +621,12 @@ export class KnowledgeService implements KnowledgePort {
           await this.finishUpgrade(signal, progressed, deleting);
         }
         await eraseLibrary(this.directory, this.connection!, baseId, signal, progressed);
+      } catch (error) {
+        // An interrupted rewrite must retire its private table before opening
+        // another snapshot. The receipt also covers interruption by process exit.
+        if (signal.aborted && error === signal.reason)
+          await recoverLibraryErasure(this.directory, this.connection!, false, progressed);
+        throw error;
       } finally {
         this.connection?.close();
         this.connection = undefined;

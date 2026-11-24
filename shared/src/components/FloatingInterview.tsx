@@ -895,7 +895,7 @@ export function FloatingInterview() {
                 submit();
               }}
             >
-              {state.screenshots.length > 0 && (
+              <InterviewReveal>{state.screenshots.length > 0 ? (
                 <div
                   className="floating-screenshot-previews"
                   role="group"
@@ -917,7 +917,7 @@ export function FloatingInterview() {
                     </div>
                   ))}
                 </div>
-              )}
+              ) : null}</InterviewReveal>
               <textarea
                 ref={inputRef}
                 aria-label={t('面试提问')}

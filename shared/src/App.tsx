@@ -10,6 +10,7 @@ import { usePreparation } from './stores/preparation';
 import { useCloudSync } from './stores/cloudSync';
 import { useKnowledge } from './stores/knowledge';
 import { useKnowledgeIndex } from './stores/knowledgeIndex';
+import { flushKnowledgeRemovalRequests } from './services/knowledgeRemovals';
 import { useCloudAccount } from './stores/cloudAccount';
 import { useAuth } from './stores/auth';
 import { useComponents, useComponentReady } from './stores/components';
@@ -75,6 +76,7 @@ export function App() {
   const ragReady = useComponentReady('rag');
   useEffect(() => {
     if (isLoginWindow || !signedIn) return;
+    void useKnowledge.getState().resumeRemovals();
     return useKnowledgeIndex.getState().connect();
   }, [isLoginWindow, signedIn]);
   useEffect(() => {
@@ -139,8 +141,8 @@ export function App() {
     return window.desktop?.onSessionCloseRequested((id) => {
       const state = usePreparation.getState();
       state.stopAll();
-      void state
-        .restoreChats()
+      void flushKnowledgeRemovalRequests()
+        .then(() => state.restoreChats())
         .then(() => state.flushChats())
         .then(async (saved) => {
           if (saved && useCloudAccount.getState().state.localMode)
@@ -268,7 +270,7 @@ export function App() {
                 navigate(next, prepare);
               }}
               collapsed={collapsed}
-              onCollapse={() => setCollapsed(!collapsed)}
+              onCollapse={() => setCollapsed((value) => !value)}
               onNew={() => navigate('preparation', () => usePreparation.getState().reset(true))}
               onSettings={() => openSettings('account')}
               onLogout={async () => {

@@ -1,12 +1,10 @@
-import { useState } from 'react';
 import { t } from '../i18n';
 import * as Menu from './ui/dropdown-menu';
 import { Button } from './ui/button';
 import { Check } from './icons';
-import type { AudioSource, InterviewAccessCheck, InterviewConfiguration } from '../../electron/contracts/speech';
+import type { AudioSource, InterviewConfiguration } from '../../electron/contracts/speech';
 import type { ChatModel } from '../../electron/contracts/chat';
 import { resolveReasoningEffort } from '../services/chatOptions';
-import { defaultInterviewConfiguration } from '../services/speech';
 import { ModelReasoningControl } from './ReasoningEffortControl';
 import { ScreenCaptureSettings } from './ScreenCaptureSettings';
 import { useAudioDevices } from './useAudioDevices';
@@ -15,62 +13,6 @@ import { SpeechModelSettings } from './SpeechModelSettings';
 import { InterviewReveal } from './InterviewReveal';
 import { RemoteConnectionSettings } from './RemoteConnection';
 import type { InterviewInputMode } from '../services/interviewInput';
-
-const microphoneCheckFailed: InterviewAccessCheck = {
-  source: 'microphone',
-  status: 'error',
-  message: '麦克风检查失败，请重新检查。',
-};
-
-function MicrophonePermission({ device, disabled }: { device?: string; disabled: boolean }) {
-  const [check, setCheck] = useState<InterviewAccessCheck>();
-  const [pending, setPending] = useState(false);
-  const [settingsError, setSettingsError] = useState(false);
-  const desktop = window.desktop;
-  if (desktop?.platform !== 'macos') return null;
-  const checkMicrophone = async () => {
-    setPending(true);
-    setSettingsError(false);
-    try {
-      const report = await desktop.checkInterviewAccess({
-        ...defaultInterviewConfiguration(),
-        inputMode: 'transcription',
-        options: { sources: ['microphone'], microphone: device },
-        autoAnswer: false,
-      });
-      setCheck(report.checks.find((item) => item.source === 'microphone') ?? microphoneCheckFailed);
-    } catch {
-      setCheck(microphoneCheckFailed);
-    } finally {
-      setPending(false);
-    }
-  };
-  const message = pending ? '正在检查…' : check?.message;
-  return (
-    <div className="settings-entry">
-      <div>
-        <strong>{t('麦克风权限')}</strong>
-        <p role="status" hidden={!message}>{message && t(message)}</p>
-        {check?.status === 'denied' && !pending && (
-          <Button
-            variant="ghost"
-            type="button"
-            onClick={() => {
-              setSettingsError(false);
-              void desktop.openMicrophoneSettings('microphone').catch(() => setSettingsError(true));
-            }}
-          >
-            {t('打开音频权限设置')}
-          </Button>
-        )}
-        {settingsError && <p role="alert">{t('无法打开系统设置，请手动打开音频隐私设置。')}</p>}
-      </div>
-      <Button type="button" variant="outline" disabled={disabled || pending} onClick={checkMicrophone}>
-        {t('检查麦克风')}
-      </Button>
-    </div>
-  );
-}
 
 export function SpeechControls({
   value,
@@ -250,11 +192,6 @@ export function SpeechControls({
               );
             })}
           </div>
-          <MicrophonePermission
-            key={value.options.microphone}
-            device={value.options.microphone}
-            disabled={busy || devicesLoading}
-          />
           <div className="settings-entry recording-preference">
             <div>
               <strong id="auto-record-label">{t('面试时自动录音')}</strong>

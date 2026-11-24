@@ -25,6 +25,7 @@ import { upgradeBaselinesFor } from './package-upgrade-baselines.mjs';
 import { requireGuestIsolation } from './guest-isolation.mjs';
 import { launchGuestAsar } from './guest-asar-host.mjs';
 import { productionFuses } from '../../scripts/production-runtime.mjs';
+import { numberedBuildReplicas } from '../../scripts/numbered-build-replicas.mjs';
 if (!process.argv.includes('--static-only')) await requireGuestIsolation();
 const args = process.argv.slice(2);
 const upgradeVersions = upgradeBaselinesFor(args);
@@ -130,10 +131,17 @@ const entries = asar.listPackage(path.join(resources, 'app.asar'));
 const archive = path.join(resources, 'app.asar');
 const assetManifest = JSON.parse(asar.extractFile(archive, 'dist/.vite/manifest.json'));
 const rendererFiles = await readdir(path.join(workspace.platformRoot, 'dist'), { recursive: true, withFileTypes: true });
-for (const file of rendererFiles.filter((entry) => entry.isFile())) {
-  const disk = path.join(file.parentPath, file.name);
-  const relative = path.relative(workspace.platformRoot, disk);
-  assert.ok(asar.extractFile(archive, relative).equals(await readFile(disk)), 'Packaged renderer differs: ' + relative);
+const rendererPaths = rendererFiles.filter(entry => entry.isFile())
+  .map(file => '/' + path.relative(workspace.platformRoot, path.join(file.parentPath, file.name)));
+const replicas = new Set(await numberedBuildReplicas(rendererPaths));
+for (const entry of rendererPaths) {
+  if (replicas.has(entry)) {
+    assert.ok(!entries.includes(entry), 'Numbered build replica in the package: ' + entry);
+    continue;
+  }
+  const relative = entry.slice(1);
+  assert.ok(asar.extractFile(archive, relative).equals(await readFile(path.join(workspace.platformRoot, relative))),
+    'Packaged renderer differs: ' + relative);
 }
 assert.ok(Object.values(assetManifest).some((chunk) => chunk.isEntry && chunk.src === 'mobile.html'));
 assert.ok(entries.some((file) => /^\/dist\/assets\/cloudRecordJson\.worker-[\w-]+\.js$/.test(file)));

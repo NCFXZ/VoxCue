@@ -3,7 +3,8 @@ import type { KnowledgeState, KnowledgeStatus } from '../../electron/contracts/k
 import { isKnowledgeFileName, KNOWLEDGE_INDEX_VERSION, knowledgeBatchChanged, knowledgeBatchLimit, knowledgeIndexCancelled } from '../../electron/contracts/knowledge';
 import type { LocalDocument } from '../services/knowledgeTypes';
 import { knowledgeCall, indexOriginal, hasKnowledgeEngine, pendingBaseRemovals, documentIndexFraction } from '../services/knowledgeIndex';
-import { localKnowledge, readKnowledgeOriginal, syncKnowledgeSnapshot, documentRevision, recoverKnowledgeBaseRemovals } from '../services/knowledge';
+import { localKnowledge, readKnowledgeOriginal, syncKnowledgeSnapshot, documentRevision } from '../services/knowledge';
+import { knowledgeRemovalPending } from '../services/knowledgeRemovals';
 import { componentReady } from './components';
 interface IndexState {
   state: KnowledgeState | null;
@@ -214,9 +215,6 @@ export const useKnowledgeIndex = create<IndexState>((set, get) => {
     connect() {
       if (!hasKnowledgeEngine()) return () => {};
       const epoch = lifetime;
-      if (!subscriptions) void recoverKnowledgeBaseRemovals().catch(e => {
-        if (epoch === lifetime) set({ error: message(e) });
-      });
       if (subscriptions++ === 0)
         unsubscribe = window.desktop!.onKnowledgeEvent((status) => {
           if (epoch !== lifetime) return;
@@ -303,6 +301,8 @@ export const useKnowledgeIndex = create<IndexState>((set, get) => {
     index(doc, force = false, selection) {
       if (!isKnowledgeFileName(doc.name)) return Promise.resolve();
       if (!hasKnowledgeEngine() || !componentReady('rag')) return Promise.resolve();
+      if (knowledgeRemovalPending('file:' + doc.id) || knowledgeRemovalPending('base:' + doc.baseId))
+        return Promise.resolve();
       const revision = documentRevision(doc);
       const existing = jobs.get(doc.id);
       if (existing && existing.baseId === doc.baseId && (!existing.started || existing.revision === revision)) {
@@ -428,7 +428,8 @@ export const useKnowledgeIndex = create<IndexState>((set, get) => {
         const groups = new Map<string, LocalDocument[]>();
         const deleting = new Set(pendingBaseRemovals());
         for (const doc of documents) {
-          if (!isKnowledgeFileName(doc.name) || deleting.has(doc.baseId)) continue;
+          if (!isKnowledgeFileName(doc.name) || deleting.has(doc.baseId) ||
+            knowledgeRemovalPending('base:' + doc.baseId) || knowledgeRemovalPending('file:' + doc.id)) continue;
           const group = groups.get(doc.baseId) ?? [];
           group.push(doc);
           groups.set(doc.baseId, group);

@@ -1,0 +1,22 @@
+.animated-collection {
+  position: relative;
+}
+.collection-exits {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 0;
+  pointer-events: none;
+  z-index: 1;
+}
+.collection-exits > [data-collection-exit] {
+  position: absolute;
+  min-width: 0;
+  min-height: 0;
+  max-width: none;
+  margin: 0;
+  pointer-events: none;
+}
+.collection-exits > [data-collection-exit] * {
+  animation: none;
+  transition: none;
+}

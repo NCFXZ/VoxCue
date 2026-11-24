@@ -19,6 +19,7 @@ export interface LocalDocument {
 }
 export interface KnowledgeManagementService {
   listBases(): Promise<KnowledgeBase[]>;
+  createBase(name: string): Promise<KnowledgeBase>;
   saveBase(base: KnowledgeBase): Promise<void>;
   deleteBase(id: string): Promise<void>;
   listDocuments(baseId: string): Promise<LocalDocument[]>;

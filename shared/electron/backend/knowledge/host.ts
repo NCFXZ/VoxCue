@@ -1,398 +1,277 @@
-import { utilityProcess, type UtilityProcess } from 'electron';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
-import type {
-  KnowledgeDocument,
-  KnowledgeItem,
-  KnowledgeHit,
-  KnowledgeMode,
-  KnowledgeEvent,
-  KnowledgeItemExpectation,
-} from '../../contracts/knowledge';
-import type { DocumentInput, KnowledgePort, KnowledgeSearchOptions, PrepareKnowledgeDatabase } from './types';
-import { KnowledgeError, knowledgeErrorFromWire } from './errors';
+import { KNOWLEDGE_INDEX_VERSION, validKnowledgeId, type KnowledgeDocument, type KnowledgeEvent,
+  type KnowledgeHit, type KnowledgeItemExpectation, type KnowledgeMode } from '../../contracts/knowledge';
 import { abortable } from '../cancellable';
-import type { EvidenceItem } from './evidence';
-class KnowledgeProcess {
-  needsIndexCleanup = false;
-  private child?: UtilityProcess;
-  private ready?: Promise<void>;
-  private retiring?: Promise<void>;
-  private pending = new Map<
-    string,
-    {
-      resolve: (value: any) => void;
-      reject: (error: Error) => void;
-      cleanup: () => void;
-      started: () => void;
-      erasureProgress: (step: unknown) => void;
-      signal: AbortSignal;
-    }
-  >();
-  constructor(
-    private directory: string,
-    private modelPath: string,
-    private progress: (status: KnowledgeEvent) => void = () => {},
-    private prepareDatabase?: PrepareKnowledgeDatabase,
-  ) {}
-  private send<T>(
-    call: Record<string, unknown>,
-    signal = new AbortController().signal,
-    timeout = 600000,
-  ): Promise<T> {
-    signal.throwIfAborted();
-    return new Promise((resolve, reject) => {
-      const id = randomUUID();
-      const cancelled = () => new KnowledgeError('cancelled', '知识库操作已取消。');
-      const abort = () => {
-        if (!this.pending.has(id)) return;
-        try {
-          this.child?.postMessage({ cancel: id });
-        } catch {
-          this.stop('本地知识库进程不可用。', 'unavailable');
-        }
-        // Keep the caller's task/byte reservation until the utility acknowledges
-        // retirement. Rejecting now would let repeated cancellation bypass it.
-      };
-      let executing = call.op !== 'search', began = false, lastStep = 0;
-      const expired = () => this.stop('知识库响应超时，请重试。', 'unavailable');
-      // Retain the existing longest-operation watchdog for an unresponsive
-      // process even if it never acknowledges starting the queued search.
-      let timer = setTimeout(expired, executing ? timeout : 600000);
-      const started = () => {
-        began = true;
-        if (executing) return;
-        executing = true;
-        clearTimeout(timer);
-        timer = setTimeout(expired, timeout);
-      };
-      const erasureProgress = (step: unknown) => {
-        if (!began || signal.aborted || (!call.init && call.op !== 'remove-base' && call.op !== 'clean-upgraded-index') ||
-            typeof step !== 'number' || !Number.isSafeInteger(step) || step <= lastStep) return;
-        lastStep = step;
-        clearTimeout(timer);
-        timer = setTimeout(expired, 600000);
-      };
-      // Start the execution timeout only when this process starts the queued search.
-      const cleanup = () => {
-        clearTimeout(timer);
-        signal.removeEventListener('abort', abort);
-      };
-      this.pending.set(id, {
-        resolve: (value) => (signal.aborted ? reject(cancelled()) : resolve(value)),
-        reject: (error) => reject(signal.aborted ? cancelled() : error),
-        cleanup,
-        started,
-        erasureProgress,
-        signal,
-      });
-      signal.addEventListener('abort', abort, { once: true });
-      try {
-        this.child!.postMessage({ id, ...call });
-      } catch {
-        this.stop('本地知识库进程不可用。', 'unavailable');
-      }
-    });
-  }
-  initialize(snapshotGeneration?: number): Promise<void> {
-    if (this.retiring) return this.waitForRetirement().then(() => this.initialize(snapshotGeneration));
-    if (this.ready) return this.ready;
-    let database: ReturnType<PrepareKnowledgeDatabase>;
-    let child: UtilityProcess;
-    try {
-      database = this.prepareDatabase?.(path.join(this.directory, 'lance'));
-      child = utilityProcess.fork(
-        path.join(__dirname, 'process.js').replace(/app\.asar([\\/])/, 'app.asar.unpacked$1'),
-        [],
-        { serviceName: 'VoxCue 本地知识库', stdio: 'pipe' },
-      );
-    } catch (error) {
-      database?.release();
-      return Promise.reject(error);
-    }
-    if (database) {
-      child.once('spawn', () => { if (child.pid) database.spawned(child.pid); });
-      child.once('exit', () => database.release());
-    }
-    this.child = child;
-    // Never forward parser/native stderr: it may contain local paths or document content.
-    child.stdout?.on('data', () => {});
-    child.stderr?.on('data', () => {});
-    child.on('message', (m) => {
-      if (this.child !== child) return;
-      if (m.event) {
-        if (this.pending.has(m.id) && !this.pending.get(m.id)!.signal.aborted)
-          this.progress(m.event);
-        return;
-      }
-      const p = this.pending.get(m.id);
-      if (!p) return;
-      if (m.started === true) {
-        p.started();
-        return;
-      }
-      if ('erasureProgress' in m) {
-        p.erasureProgress(m.erasureProgress);
-        return;
-      }
-      this.pending.delete(m.id);
-      p.cleanup();
-      if (!m.error && typeof m.needsIndexCleanup === 'boolean') this.needsIndexCleanup = m.needsIndexCleanup;
-      m.error ? p.reject(knowledgeErrorFromWire(m.error, m.errorCode)) : p.resolve(m.value);
-    });
-    child.on('exit', () => {
-      if (this.child !== child) return;
-      this.child = undefined;
-      this.ready = undefined;
-      for (const p of this.pending.values()) {
-        p.cleanup();
-        p.reject(new KnowledgeError('unavailable', '本地知识库进程已退出，请重试。'));
-      }
-      this.pending.clear();
-    });
-    this.ready = this.send<void>(
-      { init: { directory: this.directory, modelPath: this.modelPath, snapshotGeneration,
-        ...(database && { databasePath: database.path }) } },
-      undefined,
-      30000,
-    ).catch((error) => {
-      if (this.child === child) this.stop();
-      throw error;
-    });
-    return this.ready;
-  }
-  async call<T>(op: string, data: Record<string, unknown> & { snapshotGeneration?: number }, signal?: AbortSignal) {
-    await this.initialize(data.snapshotGeneration);
-    signal?.throwIfAborted();
-    return this.send<T>({ op, ...data }, signal, op === 'search' ? 30000 : 600000);
-  }
-  private async waitForRetirement(work = this.retiring, timeout = 10000) {
-    if (!work) return;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    try {
-      await Promise.race([
-        work,
-        new Promise<never>((_resolve, reject) => {
-          timer = setTimeout(
-            () => reject(new KnowledgeError('unavailable', '知识库未能退出，暂时无法删除模型。')),
-            timeout,
-          );
-        }),
-      ]);
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-  close() {
-    return this.waitForRetirement(
-      (async () => {
-        try {
-          if (this.child) await this.send({ op: 'close' }, undefined, 10000);
-        } finally {
-          this.stop();
-          await this.retiring;
-        }
-      })(),
-      20000,
-    );
-  }
-  unloadModel() {
-    return this.waitForRetirement(
-      (async () => {
-        try {
-          if (this.child) await this.send({ op: 'unload-model' }, undefined, 30000);
-        } finally {
-          // ONNX can retain mapped model handles until the utility exits.
-          await this.close();
-        }
-      })(),
-      50000,
-    );
-  }
-  stopIfIdle() {
-    // Explicit close and unload also own pending replies until the utility acknowledges them.
-    if (!this.pending.size) this.stop();
-  }
-  stop(message = '知识库服务已关闭。', code: 'closed' | 'unavailable' = 'closed') {
-    const child = this.child;
-    if (!child) return;
-    this.child = undefined;
-    this.ready = undefined;
-    const pending = this.pending;
-    this.pending = new Map();
-    for (const p of pending.values()) p.cleanup();
-    const settle = (error: KnowledgeError) => {
-      for (const p of pending.values()) p.reject(error);
-      pending.clear();
-    };
-    // Callers must fail within a deadline even if kill fails. The separate
-    // retirement fence still blocks new work and model removal until actual exit.
-    const timer = pending.size
-      ? setTimeout(
-          () => settle(new KnowledgeError('unavailable', '知识库进程尚未退出，请稍后重试。')),
-          10000,
-        )
-      : undefined;
-    const retired = new Promise<void>((resolve) => {
-      child.once('exit', () => {
-        clearTimeout(timer);
-        settle(new KnowledgeError(code, message));
-        resolve();
-      });
-    });
-    this.retiring = retired;
-    void retired.then(() => {
-      if (this.retiring === retired) this.retiring = undefined;
-    });
-    try {
-      child.kill();
-    } catch {
-      // Exit remains unconfirmed: keep the retirement fence after callers fail.
-      // Explicit close/initialize deadlines cannot authorize replacement/removal.
-    }
-  }
+import type { Catalog } from './eraseLibrary';
+import { KnowledgeError } from './errors';
+import { checkedDirectory, ensurePublishedLibrary, invalidLayout, libraryDirectory, libraryKey,
+  libraryPaths, ownerOf, readJson, readLayout, removeLibraryFolder } from './libraryLayout';
+import { MODEL_REVISION, type DocumentInput, type KnowledgePort, type KnowledgeSearchOptions, type PrepareKnowledgeDatabase } from './types';
+import { KnowledgeProcess, LibraryKnowledgeHost } from './workerHost';
+
+interface LibraryWorker {
+  readonly host: LibraryKnowledgeHost;
+  readonly scope: AbortController;
+  readonly requests: Set<Promise<unknown>>;
+  created?: Promise<void>;
+  retiring?: Promise<void>;
 }
 
+const emptyVersion = createHash('sha256').update('[]').digest('hex');
+const removing = () => new KnowledgeError('cancelled', '这个知识库正在删除，暂时无法写入资料。');
+
+/** Routes a profile's requests to independently owned library databases. */
 export class KnowledgeHost implements KnowledgePort {
   indexCleanupError?: string;
-  private readonly primary: KnowledgeProcess;
-  private readonly reader: KnowledgeProcess;
-  private writes = 0;
-  private destructiveWrites = 0;
-  private withdrawal = 0;
-  private snapshotReads = 0;
-  private generation = 0;
-  private exclusiveWrite?: Promise<null>;
-  private indexCleanup?: Promise<void>;
+  private ready?: Promise<void>;
+  private migration?: KnowledgeProcess;
+  private lifetime = new AbortController();
+  private closing?: Promise<void>;
+  private readonly workers = new Map<string, LibraryWorker>();
+  private readonly batches = new Map<string, string>();
+  private readonly removals = new Map<string, Promise<null>>();
 
-  constructor(directory: string, modelPath: string, private readonly progress: (status: KnowledgeEvent) => void = () => {}, prepareDatabase?: PrepareKnowledgeDatabase) {
-    this.primary = new KnowledgeProcess(directory, modelPath, progress, prepareDatabase);
-    this.reader = new KnowledgeProcess(directory, modelPath, undefined, prepareDatabase);
-  }
-  initialize() { return this.primary.initialize(); }
+  constructor(private readonly root: string, private readonly modelPath: string,
+    private readonly progress: (event: KnowledgeEvent) => void = () => {},
+    private readonly prepareDatabase?: PrepareKnowledgeDatabase) {}
 
-  private async mutate<T>(op: 'begin-index-batch' | 'finish-index-batch' | 'index' | 'invalidate' | 'remove' | 'remove-base' | 'clean-upgraded-index', data: Record<string, unknown>, signal: AbortSignal): Promise<T> {
-    const exclusive = op === 'remove-base' || op === 'clean-upgraded-index';
-    if (!exclusive && this.exclusiveWrite) {
-      await abortable(this.exclusiveWrite.catch(() => {}), signal);
-      return this.mutate<T>(op, data, signal);
-    }
-    this.writes++;
-    const withdraws = op === 'invalidate' || op === 'remove' || exclusive;
-    if (withdraws) {
-      this.destructiveWrites++;
-      this.withdrawal++;
-    }
-    try {
-      if (exclusive) await this.reader.close();
-      if (op === 'index' || op === 'begin-index-batch') {
-        await this.primary.initialize();
-        if (this.primary.needsIndexCleanup || this.indexCleanup)
-          await abortable(this.cleanOldIndex(), signal);
-        signal.throwIfAborted();
+  async initialize() {
+    this.lifetime.signal.throwIfAborted();
+    return this.ready ??= (async () => {
+      const layout = await readLayout(this.root);
+      this.lifetime.signal.throwIfAborted();
+      if (layout && !layout.legacy && !this.migration) return;
+      const migration = this.migration ??= new KnowledgeProcess(this.root, this.modelPath, undefined, this.prepareDatabase, true);
+      try {
+        if (!layout || layout.legacy) await migration.initialize();
+      } finally {
+        await migration.stopAndWait();
+        this.migration = undefined;
       }
-      return await this.primary.call<T>(op, data, signal);
-    } finally {
-      if (withdraws || (op === 'index' && !(data.input as DocumentInput).batchId) ||
-          (op === 'finish-index-batch' && data.commit)) this.generation++;
-      this.writes--;
-      if (exclusive) this.progress({ type: 'old-index-deletion', active: false });
-      if (withdraws) this.destructiveWrites--;
-      this.releaseReader();
+    })().catch(error => { this.ready = undefined; throw error; });
+  }
+
+  private async run<T>(baseId: string, signal: AbortSignal | undefined,
+    action: (host: LibraryKnowledgeHost, scope: AbortSignal) => Promise<T>, create = false): Promise<T | undefined> {
+    const folder = path.join(this.root, libraryDirectory, libraryKey(baseId));
+    const profile = this.lifetime.signal;
+    const request = signal ? AbortSignal.any([profile, signal]) : profile;
+    request.throwIfAborted();
+    await abortable(this.initialize(), request);
+    if (this.removals.has(baseId)) {
+      if (create) throw removing();
+      return;
+    }
+    let worker = this.workers.get(baseId);
+    if (worker?.scope.signal.aborted) {
+      await abortable(this.retire(baseId, worker), request);
+      return this.run(baseId, request, action, create);
+    }
+    if (!worker) {
+      worker = { host: new LibraryKnowledgeHost(folder, this.modelPath, this.progress, this.prepareDatabase),
+        scope: new AbortController(), requests: new Set() };
+      this.workers.set(baseId, worker);
+    }
+    const selected = worker;
+    const scope = AbortSignal.any([request, selected.scope.signal]);
+    const work = (async () => {
+      if (create) selected.created ??= ensurePublishedLibrary(this.root, baseId).catch(error => {
+        selected.created = undefined;
+        throw error;
+      });
+      if (selected.created) await selected.created;
+      else {
+        if (!(await checkedDirectory(folder))) return;
+        if (await ownerOf(folder) !== baseId) throw invalidLayout();
+      }
+      scope.throwIfAborted();
+      return action(selected.host, scope);
+    })();
+    selected.requests.add(work);
+    try { return await work; }
+    finally {
+      selected.requests.delete(work);
+      // Keep the current library warm, without retaining a model per library
+      // the user has visited. An open batch still owns its writer.
+      const staged = new Set(this.batches.values());
+      for (const [id, idle] of this.workers) {
+        if (id !== baseId && !idle.requests.size && !staged.has(id) && !this.removals.has(id))
+          void this.retire(id, idle).catch(() => {});
+      }
     }
   }
-  private async read<T>(op: string, data: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
-    if (this.exclusiveWrite) {
-      const settled = this.exclusiveWrite.catch(() => {});
-      await (signal ? abortable(settled, signal) : settled);
-      return this.read<T>(op, data, signal);
+
+  private retire(baseId: string, worker: LibraryWorker) {
+    worker.scope.abort();
+    return worker.retiring ??= (async () => {
+      const stopped = worker.host.stopAndWait();
+      const [result] = await Promise.allSettled([stopped, ...worker.requests]);
+      if (result.status === 'rejected') throw result.reason;
+      if (this.workers.get(baseId) === worker) this.workers.delete(baseId);
+    })().finally(() => { worker.retiring = undefined; });
+  }
+
+  private async catalog(baseId: string, folder: string) {
+    const catalog = await readJson(path.join(folder, 'catalog.json')) as Catalog | undefined;
+    if (catalog === undefined) return;
+    if (catalog?.schemaVersion !== 1 || catalog.modelVersion !== MODEL_REVISION ||
+        !catalog.documents || typeof catalog.documents !== 'object' || Array.isArray(catalog.documents) ||
+        (catalog.blocked !== undefined && !Array.isArray(catalog.blocked)) ||
+        Object.entries(catalog.documents).some(([id, entry]) => !validKnowledgeId(id) ||
+          entry?.document?.documentId !== id || entry.document.baseId !== baseId)) throw invalidLayout();
+    return catalog;
+  }
+
+  private async catalogs(signal = this.lifetime.signal) {
+    await abortable(this.initialize(), signal);
+    const sources = new Map<string, Catalog>();
+    for (const [id, folder] of await libraryPaths(this.root)) {
+      signal.throwIfAborted();
+      if (this.removals.has(id)) continue;
+      const catalog = await this.catalog(id, folder);
+      if (catalog && !this.removals.has(id)) sources.set(id, catalog);
     }
-    if (!this.writes || this.destructiveWrites) return this.primary.call<T>(op, data, signal);
-    // A second utility opens only on contention. Lance checkout pins it to
-    // the atomically published catalog while the writer builds its next version.
-    this.snapshotReads++;
-    const withdrawal = this.withdrawal;
+    return sources;
+  }
+
+  async beginIndexBatch(id: string, baseId: string, documentIds: string[], signal: AbortSignal) {
+    this.batches.set(id, baseId);
     try {
-      const value = await this.reader.call<T>(op, { ...data, snapshotGeneration: this.generation }, signal);
-      if (withdrawal !== this.withdrawal) return this.read<T>(op, data, signal);
-      return value;
-    } finally {
-      this.snapshotReads--;
-      this.releaseReader();
+      await this.run(baseId, signal, (host, scope) => host.beginIndexBatch(id, baseId, documentIds, scope), true);
+    } catch (error) {
+      this.batches.delete(id);
+      throw error;
     }
   }
-  private releaseReader() {
-    if (!this.writes && !this.snapshotReads) this.reader.stopIfIdle();
+
+  async finishIndexBatch(id: string, commit: boolean, signal: AbortSignal) {
+    const baseId = this.batches.get(id);
+    if (!baseId && commit) throw new KnowledgeError('cancelled', '知识库导入批次已取消。');
+    if (!baseId) return;
+    try {
+      await this.run(baseId, signal, (host, scope) => host.finishIndexBatch(id, commit, scope));
+    } finally { this.batches.delete(id); }
   }
-  async close() { await Promise.all([this.primary.close(), this.reader.close()]); }
-  async unloadModel() { await Promise.all([this.primary.unloadModel(), this.reader.unloadModel()]); }
-  stop() { this.primary.stop(); this.reader.stop(); }
-  beginIndexBatch(id: string, baseId: string, documentIds: string[], signal: AbortSignal) {
-    return this.mutate<void>('begin-index-batch', { batchId: id, baseId, documentIds }, signal);
+
+  async indexDocument(input: DocumentInput, signal: AbortSignal) {
+    const catalogs = await this.catalogs(signal);
+    for (const [id, catalog] of catalogs) {
+      // Cloud restore can move an existing document ID into a different library.
+      // Withdraw the old live entry while keeping its recovery history in its own library.
+      if (id !== input.baseId && Object.hasOwn(catalog.documents, input.documentId) && !catalog.blocked?.includes(input.documentId))
+        await this.run(id, signal, (host, scope) => host.invalidateDocument(input.documentId, scope));
+    }
+    const document = await this.run(input.baseId, signal, (host, scope) => host.indexDocument(input, scope), true);
+    if (!document) throw removing();
+    return document;
   }
-  finishIndexBatch(id: string, commit: boolean, signal: AbortSignal) {
-    return this.mutate<void>('finish-index-batch', { batchId: id, commit }, signal);
+  updateDocument(input: DocumentInput, signal: AbortSignal) { return this.indexDocument(input, signal); }
+
+  private async mutateDocument(op: 'invalidateDocument' | 'removeDocument', documentId: string, signal: AbortSignal): Promise<null> {
+    for (const [id, catalog] of await this.catalogs(signal))
+      if (Object.hasOwn(catalog.documents, documentId))
+        await this.run(id, signal, (host, scope) => host[op](documentId, scope));
+    return null;
   }
-  indexDocument(input: DocumentInput, signal: AbortSignal) {
-    return this.mutate<KnowledgeDocument>('index', { input }, signal);
-  }
-  updateDocument(input: DocumentInput, signal: AbortSignal) {
-    return this.indexDocument(input, signal);
-  }
-  invalidateDocument(documentId: string, signal: AbortSignal) {
-    return this.mutate<null>('invalidate', { documentId }, signal);
-  }
-  removeDocument(documentId: string, signal: AbortSignal) {
-    return this.mutate<null>('remove', { documentId }, signal);
-  }
-  removeBase(baseId: string, signal: AbortSignal) {
-    return this.exclusive('remove-base', { baseId }, signal);
-  }
-  private exclusive(op: 'remove-base' | 'clean-upgraded-index', data: Record<string, unknown>, signal: AbortSignal) {
-    const previous = this.exclusiveWrite ?? Promise.resolve();
-    const work: Promise<null> = previous.catch(() => {}).then(() =>
-      this.mutate<null>(op, data, signal),
-    ).finally(() => {
-      if (this.exclusiveWrite === work) this.exclusiveWrite = undefined;
-    });
-    this.exclusiveWrite = work;
+  invalidateDocument(documentId: string, signal: AbortSignal) { return this.mutateDocument('invalidateDocument', documentId, signal); }
+  removeDocument(documentId: string, signal: AbortSignal) { return this.mutateDocument('removeDocument', documentId, signal); }
+
+  async removeBase(baseId: string, signal: AbortSignal): Promise<null> {
+    if (!validKnowledgeId(baseId) || baseId === 'personal-resume') throw new KnowledgeError('invalid_request', '无效知识库 ID。');
+    const existing = this.removals.get(baseId);
+    if (existing) return existing;
+    const scope = AbortSignal.any([signal, this.lifetime.signal]);
+    const work = (async () => {
+      await abortable(this.initialize(), scope);
+      const worker = this.workers.get(baseId);
+      if (worker) await this.retire(baseId, worker);
+      await removeLibraryFolder(this.root, baseId, scope);
+      return null;
+    })().finally(() => { this.removals.delete(baseId); });
+    this.removals.set(baseId, work);
     return work;
   }
-  private cleanOldIndex() {
-    return this.indexCleanup ??= this.exclusive('clean-upgraded-index', {}, new AbortController().signal)
-      .then(() => { this.indexCleanupError = undefined; }, error => {
-        this.indexCleanupError = error instanceof Error ? error.message : '旧索引清理尚未完成，请重试。';
-        throw error;
-      }).finally(() => { this.indexCleanup = undefined; });
-  }
+
   async listDocuments(allowIndexCleanup = true) {
-    const documents = await this.read<KnowledgeDocument[]>('list', {});
-    if (!allowIndexCleanup) return documents;
-    if (!this.primary.needsIndexCleanup && !this.indexCleanup) {
-      this.indexCleanupError = undefined;
-      return documents;
+    const documents = new Map<string, KnowledgeDocument>();
+    this.indexCleanupError = undefined;
+    for (const [id, catalog] of await this.catalogs()) {
+      if (this.removals.has(id)) continue;
+      const needCleanup = allowIndexCleanup && (!!catalog.indexUpgrade ||
+        Object.values(catalog.documents).some(entry => entry.document.indexVersion !== KNOWLEDGE_INDEX_VERSION));
+      const worker = this.workers.get(id);
+      const rows = needCleanup || (worker && !worker.scope.signal.aborted)
+        ? await this.run(id, undefined, async (host, scope) => {
+            const rows = await host.listDocuments(allowIndexCleanup, scope);
+            this.indexCleanupError ??= host.indexCleanupError;
+            return rows;
+          }) ?? []
+        : Object.values(catalog.documents).map(({ document }) => ({ ...document,
+            available: document.indexVersion === KNOWLEDGE_INDEX_VERSION && !catalog.blocked?.includes(document.documentId),
+          }));
+      for (const row of rows) {
+        if (this.removals.has(id)) break;
+        if (!documents.has(row.documentId) || row.available !== false) documents.set(row.documentId, row);
+      }
     }
-    // Status returns the resulting catalog and exposes cleanup failures through indexCleanupError.
-    await this.cleanOldIndex().catch(() => {});
-    return this.read<KnowledgeDocument[]>('list', {});
+    return [...documents.values()];
   }
-  search(
-    query: string,
-    topK = 10,
-    mode: KnowledgeMode = 'hybrid',
-    signal: AbortSignal,
-    baseId?: string,
-    options?: KnowledgeSearchOptions,
-  ) {
-    return this.read<KnowledgeHit[]>('search', { query, topK, mode, baseId, options }, signal);
+
+  async search(query: string, topK = 10, mode: KnowledgeMode = 'hybrid', signal: AbortSignal, baseId?: string, options?: KnowledgeSearchOptions) {
+    const search = async (id: string) => await this.run(id, signal, (host, scope) => host.search(query, topK, mode, scope, id, options)) ?? [];
+    if (baseId !== undefined) return search(baseId);
+    const hits: KnowledgeHit[] = [];
+    for (const [id, catalog] of await this.catalogs(signal)) {
+      if (Object.keys(catalog.documents).length) hits.push(...await search(id));
+    }
+    return hits.sort((a, b) => b.score - a.score).slice(0, topK);
   }
-  version(baseId: string, signal: AbortSignal) {
-    return this.read<string>('version', { baseId }, signal);
+
+  async version(baseId: string, signal: AbortSignal) {
+    return await this.run(baseId, signal, (host, scope) => host.version(baseId, scope)) ?? emptyVersion;
   }
-  getItem(itemId: string, signal?: AbortSignal, expected?: KnowledgeItemExpectation) {
-    return this.read<KnowledgeItem | null>('item', { itemId, expected }, signal);
+
+  async getItem(itemId: string, signal?: AbortSignal, expected?: KnowledgeItemExpectation) {
+    if (expected) return await this.run(expected.baseId, signal, (host, scope) => host.getItem(itemId, scope, expected)) ?? null;
+    const documentId = itemId.split(':', 1)[0];
+    for (const [baseId, catalog] of await this.catalogs(signal)) {
+      if (!Object.hasOwn(catalog.documents, documentId) || catalog.blocked?.includes(documentId)) continue;
+      const item = await this.run(baseId, signal, (host, scope) => host.getItem(itemId, scope));
+      if (item) return item;
+    }
+    return null;
   }
-  getEvidenceItem(hit: KnowledgeHit, signal: AbortSignal, expected?: KnowledgeItemExpectation) {
-    return this.read<EvidenceItem | null>('evidence', { hit, expected }, signal);
+
+  async getEvidenceItem(hit: KnowledgeHit, signal: AbortSignal, expected?: KnowledgeItemExpectation) {
+    const baseId = expected?.baseId ?? hit.baseId;
+    return baseId ? await this.run(baseId, signal, (host, scope) => host.getEvidenceItem(hit, scope, expected)) ?? null : null;
   }
+
+  stop() {
+    this.lifetime.abort();
+    this.migration?.stop();
+    for (const worker of this.workers.values()) {
+      worker.scope.abort();
+      worker.host.stop();
+    }
+  }
+
+  close() {
+    return this.closing ??= (async () => {
+      this.stop();
+      const result = await Promise.allSettled([
+        ...(this.migration ? [this.migration.stopAndWait()] : []),
+        ...[...this.workers].map(([id, worker]) => this.retire(id, worker)),
+      ]);
+      await Promise.allSettled([...this.removals.values(), this.ready]);
+      for (const retired of result) if (retired.status === 'rejected') throw retired.reason;
+      this.batches.clear();
+      this.migration = undefined;
+      this.ready = undefined;
+      this.lifetime = new AbortController();
+    })().finally(() => { this.closing = undefined; });
+  }
+
+  unloadModel() { return this.close(); }
 }

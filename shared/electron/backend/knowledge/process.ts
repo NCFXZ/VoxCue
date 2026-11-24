@@ -3,6 +3,7 @@ import { parseDocument } from './parser';
 import { LocalEmbedder } from './embedding';
 import { KnowledgeError } from './errors';
 import { projectEvidence } from './evidence';
+import { migrateLibraryLayout } from './libraryMigration';
 import type { OldIndexDeletion } from '../../contracts/knowledge';
 const port = process.parentPort!;
 let core: KnowledgeService;
@@ -53,7 +54,9 @@ async function drain() {
         signal.throwIfAborted();
         port.postMessage({ id: m.id, started: true });
         let value: unknown;
-        if (m.init) {
+        if (m.init?.layoutMigration) {
+          await migrateLibraryLayout(m.init.directory, erasureProgress);
+        } else if (m.init) {
           core = new KnowledgeService(
             m.init.directory,
             new LocalEmbedder(m.init.modelPath),
@@ -124,8 +127,9 @@ async function drain() {
               throw new KnowledgeError('invalid_request', '未知知识库操作。');
           }
         }
-        signal.throwIfAborted();
-        port.postMessage({ id: m.id, value, needsIndexCleanup: core.needsIndexCleanup });
+        // A completed removal may have committed before its pause arrived.
+        if (m.op !== 'remove' && m.op !== 'remove-base') signal.throwIfAborted();
+        port.postMessage({ id: m.id, value, needsIndexCleanup: core?.needsIndexCleanup });
       } catch (error) {
         port.postMessage({
           id: m.id,
@@ -158,5 +162,6 @@ function publicError(error: unknown) {
 }
 process.on('SIGTERM', () => {
   for (const c of controllers.values()) c.abort();
-  void core?.close().finally(() => process.exit(0));
+  if (!core) process.exit(0);
+  void core.close().finally(() => process.exit(0));
 });

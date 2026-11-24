@@ -3,6 +3,7 @@ import { useRef, type ReactNode } from 'react';
 import * as DropdownMenu from './ui/dropdown-menu';
 import { Button } from './ui/button';
 import { ConfirmDeleteButton } from './ui/confirm-delete-button';
+import { AnimatedCollection } from './ui/AnimatedCollection';
 import { Folder, Paperclip, Plus } from './icons';
 import { usePreparation } from '../stores/preparation';
 import { chatFileAccept } from '../services/chatOptions';
@@ -106,9 +107,9 @@ export function ChatAttachments() {
   const state = usePreparation();
   const provider = useModelProvider();
   return (
-    <div className="chat-attachments">
+    <AnimatedCollection className="chat-attachments" wrapped enabled={state.chatsReady}>
       {state.attachments.map((item) => (
-        <div className="chat-attachment" key={item.id}>
+        <div className="chat-attachment" key={item.name} data-motion-revision={item.id}>
           <Paperclip size={14} />
           <span>
             {item.name}
@@ -129,6 +130,6 @@ export function ChatAttachments() {
           />
         </div>
       ))}
-    </div>
+    </AnimatedCollection>
   );
 }

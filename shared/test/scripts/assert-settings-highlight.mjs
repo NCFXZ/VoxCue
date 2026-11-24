@@ -127,7 +127,8 @@ export async function assertSettingsHighlight(row, { keyboard = false } = {}) {
       ],
       separateHeadingGap,
       bottomExtension: row.matches('.speech-controls > .remote-connection-settings')
-        ? parseFloat(getComputedStyle(row.parentElement).rowGap) : 0,
+        ? parseFloat(getComputedStyle(row.parentElement).rowGap)
+        : row.matches('.speech-device-grid') ? 10 : 0,
       dark: document.documentElement.classList.contains('dark'),
       height: parseFloat(skin.height),
       rowHeight: row.clientHeight,
