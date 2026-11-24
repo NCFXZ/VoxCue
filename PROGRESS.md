@@ -2,7 +2,7 @@
 
 ## 当前版本与范围
 
-**2026-11-24 · macOS 1.3.5 准备发行。** 两端已发基线为 1.3.3。版本唯一来源为 `shared/package.json`，根和 Mac 配置已同步至 1.3.5。Windows 配置由 Windows 本机同步。完成源码回归、正式包隔离验收和权限复验后发布到 GitHub 和 CNB。
+**2026-11-24 · macOS 1.3.5 已正式发行，Windows 当前公开基线为 1.3.3。** 版本唯一来源为 `shared/package.json`，根和 Mac 配置已同步至 1.3.5。Windows 配置由 Windows 本机同步。
 
 - 侧栏、聊天记录、知识库卡片和文档、待发送附件及两个面试输入框采用非线性动画。跨行补位时在行边缘淡出和淡入。知识库详情平滑调整高度，到达上限后文档区滚动，关闭时原地淡出。
 - 知识库按库使用独立索引目录和写进程。后台删除可跨重启恢复。由旧共享布局升级时先清理旧生成索引，再从保留的原件按库重建，沿用现有索引进度。现有分库索引继续使用。
@@ -17,6 +17,7 @@
 
 ## 发行状态与接续待办
 
+- Mac 1.3.5 同一组签名 DMG、ZIP、增量计划和清单已发布。源代码位于 GitHub 的 `v1.3.5`。公开更新索引包含 Mac 1.3.5，保留 Windows 1.3.3 和历史资产。 [GitHub 1.3.5](https://github.com/NCFXZ/VoxCue/releases/tag/v1.3.5) · [CNB 1.3.5](https://cnb.cool/voxcue-release/voxcue-release/-/releases/tag/v1.3.5)
 - [GitHub 1.3.3](https://github.com/NCFXZ/VoxCue/releases/tag/v1.3.3)和 [CNB 1.3.3](https://cnb.cool/voxcue-release/voxcue-release/-/releases/tag/v1.3.3)保留两端正式原件作为升级基线。
 - 在 Windows 本机按交接同步 1.3.5，并完成原生、DPI、升级、签名和发布验收，再追加 Windows 发行资产和 CNB 索引。Microsoft Store 2.3.3.0 已提交认证（Submission 12，`1152921505702489003`）。
 - [官网欢迎公告配置](shared/docs/ANNOUNCEMENTS.md)待在另一台电脑的 EdgeOne Pages 项目 `voxcue-website` 发布并核对 `/app/announcements.json`。
