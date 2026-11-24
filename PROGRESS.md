@@ -2,7 +2,7 @@
 
 ## 当前版本与范围
 
-**2026-11-24 · macOS 1.3.5 已正式发行，Windows 当前公开基线为 1.3.3。** 版本唯一来源为 `shared/package.json`，根和 Mac 配置已同步至 1.3.5。Windows 配置由 Windows 本机同步。
+**2026-11-24 · macOS 和 Windows 1.3.5 已在 GitHub 与 CNB 正式发行。** 版本唯一来源为 `shared/package.json`，平台配置分别由本机同步。Microsoft Store 2.3.5.0 已提交认证。
 
 - 侧栏、聊天记录、知识库卡片和文档、待发送附件及两个面试输入框采用非线性动画。跨行补位时在行边缘淡出和淡入。知识库详情平滑调整高度，到达上限后文档区滚动，关闭时原地淡出。
 - 知识库按库使用独立索引目录和写进程。后台删除可跨重启恢复。由旧共享布局升级时先清理旧生成索引，再从保留的原件按库重建，沿用现有索引进度。现有分库索引继续使用。
@@ -18,8 +18,9 @@
 
 ## 发行状态与接续待办
 
-- Mac 1.3.5 同一组签名 DMG、ZIP、增量计划和清单已发布。源代码位于 GitHub 的 `v1.3.5`。公开更新索引包含 Mac 1.3.5，保留 Windows 1.3.3 和历史资产。 [GitHub 1.3.5](https://github.com/NCFXZ/VoxCue/releases/tag/v1.3.5) · [CNB 1.3.5](https://cnb.cool/voxcue-release/voxcue-release/-/releases/tag/v1.3.5)
+- Mac 1.3.5 的签名 DMG、ZIP、增量计划和清单已发布，源码位于 GitHub 的 `v1.3.5`。Windows 1.3.5 的 EXE、blockmap 和 Ed25519 签名清单已发布，源码提交为 `381b7b7d`。CNB 公开更新索引包含两端的 1.3.5 和 1.3.3。 [GitHub 1.3.5](https://github.com/NCFXZ/VoxCue/releases/tag/v1.3.5) · [CNB 1.3.5](https://cnb.cool/voxcue-release/voxcue-release/-/releases/tag/v1.3.5)
 - [GitHub 1.3.3](https://github.com/NCFXZ/VoxCue/releases/tag/v1.3.3)和 [CNB 1.3.3](https://cnb.cool/voxcue-release/voxcue-release/-/releases/tag/v1.3.3)保留两端正式原件作为升级基线。
-- Windows 1.3.5 配置已在本机同步。已保留 Windows 1.3.3 EXE、blockmap、签名清单及 Store 包。Sandbox 升级入口为 `store-sandbox-smoke.mjs --nsis-upgrade-1.3.3` 和 `--appx-upgrade-1.3.3`。接续工作包括剩余功能、稳定性与安装回归，以及 GitHub／CNB 1.3.5 和 Microsoft Store 2.3.5.0 发布。Partner Center 显示上一版 Store 2.3.3.0 的 Submission 12 已上架。
+- Windows Sandbox 升级入口为 `store-sandbox-smoke.mjs --nsis-upgrade-1.3.3` 和 `--appx-upgrade-1.3.3`，本机保留对应的 1.3.3 升级基线。
+- Microsoft Store 2.3.5.0 的 Submission 13 已提交，等待认证及上架。中英文商品页各有六张新截图，首图为面试窗口。Partner Center 当前公开版本为 Submission 12 的 2.3.3.0。
 - [官网欢迎公告配置](shared/docs/ANNOUNCEMENTS.md)待在另一台电脑的 EdgeOne Pages 项目 `voxcue-website` 发布并核对 `/app/announcements.json`。
 - 固定轻量语音模型可能误识别极短语气词。云端 0.6.1 跨设备并发新增截图引用与删除的既有竞态详见 [历史交接](shared/docs/WINDOWS_1.3.0_HANDOFF.md)。
