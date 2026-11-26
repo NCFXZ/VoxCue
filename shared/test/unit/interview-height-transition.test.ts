@@ -60,6 +60,11 @@ function fixture(height = 100, scroll = { style: { overflowAnchor: 'auto' } }) {
       });
       const player = {
         height: parseFloat(frames[0].height),
+        playState: 'running',
+        effect: {
+          getTiming: () => ({ duration: 240, delay: 0, easing: 'cubic-bezier(0.2, 0, 0, 1)' }),
+          getComputedTiming: () => ({ localTime: 120 }),
+        },
         finished,
         finish: resolve,
         cancel: vi.fn(() => {
@@ -95,6 +100,8 @@ it('uses only height/clip with the shared tab timing and continues a rapid rever
   f.model.height = 100;
   f.render('remote');
   expect(f.node.animate.mock.calls[1][0][0].height).toBe('75px');
+  // The way back covers half the earlier travel, so it takes half the time from rest.
+  expect(f.node.animate.mock.calls[1][1]).toEqual({ duration: 120, easing: 'cubic-bezier(0.2, 0, 0, 1)', fill: 'both' });
   expect(f.players[0].cancel).toHaveBeenCalled();
   expect(f.scroll.style.overflowAnchor).toBe('none');
   await Promise.resolve();

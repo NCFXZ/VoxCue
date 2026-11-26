@@ -1,5 +1,6 @@
 import { cloneElement, Component, createRef, type ReactElement, type ReactNode } from 'react';
 import { modalExitRemaining } from './modal-motion';
+import { continuedTiming, runningMotion, type RunningMotion } from './motion-continuation';
 import { prepareVisualSnapshot } from './visual-snapshot';
 import './animated-collection.css';
 
@@ -47,6 +48,7 @@ export class AnimatedCollection extends Component<Props> {
   private readonly root = createRef<HTMLDivElement>();
   private readonly overlay = createRef<HTMLDivElement>();
   private readonly animations = new Map<HTMLElement, Animation>();
+  private readonly travel = new Map<HTMLElement, readonly number[]>();
   private preference?: MediaQueryList;
   private frame = 0;
 
@@ -115,6 +117,13 @@ export class AnimatedCollection extends Component<Props> {
         const rect = node.getBoundingClientRect();
         return Math.abs(rect.width - before.width) < 0.5 && Math.abs(rect.height - before.height) < 0.5;
       })) return;
+    // Read each sliding item's carried speed before its retarget cancels it.
+    const running = new Map<HTMLElement, RunningMotion>();
+    for (const [node, animation] of this.animations) {
+      const travel = this.travel.get(node);
+      const motion = travel && runningMotion(animation, travel);
+      if (motion) running.set(node, motion);
+    }
     // Release earlier transforms before measuring the new flow. Existing exit
     // visuals are independent, so a second edit can finish their original fades.
     for (const node of Array.from(this.animations.keys()))
@@ -217,7 +226,8 @@ export class AnimatedCollection extends Component<Props> {
             clipPath: from.clipPath === 'none' ? shown : from.clipPath,
           },
           { translate: '0px 0px', opacity: 1, clipPath: shown },
-        ], layoutTiming);
+        ], moved ? continuedTiming(layoutTiming, running.get(node), [-x, -y]) : layoutTiming);
+        if (moved) this.travel.set(node, [-x, -y]);
       }
     }
     for (const [key, item] of layout.items)
@@ -268,6 +278,7 @@ export class AnimatedCollection extends Component<Props> {
   private cancel(node: HTMLElement) {
     const animation = this.animations.get(node);
     this.animations.delete(node);
+    this.travel.delete(node);
     animation?.cancel();
     if (node === this.root.current) {
       delete node.dataset.collectionResizing;

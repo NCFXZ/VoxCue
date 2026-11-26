@@ -1,6 +1,7 @@
 import { useLayoutEffect, type RefObject } from 'react';
+import { continuedTiming, runningMotion } from './motion-continuation';
 
-type Position = { top: number; height: number; resizing: boolean; animation?: Animation };
+type Position = { top: number; height: number; resizing: boolean; animation?: Animation; start?: number };
 
 // Reveal animations already move the flow. Animate only the remaining layout
 // jumps, continuing from the visible position when another change interrupts.
@@ -35,7 +36,9 @@ export function useNoticeStackMotion(ref: RefObject<HTMLDivElement | null>) {
         );
         const jump = previous ? previous.top + flow - top : 0;
         if (previous && (previous.resizing || resizing)) flow += height - previous.height;
-        return { node, previous, top, height, resizing, jump, offset };
+        // Read the carried speed before a retarget cancels it.
+        const running = previous?.start === undefined ? undefined : runningMotion(previous.animation, [-previous.start]);
+        return { node, previous, top, height, resizing, jump, offset, running };
       });
       for (const [node, position] of positions) {
         if (nodes.includes(node)) continue;
@@ -47,7 +50,7 @@ export function useNoticeStackMotion(ref: RefObject<HTMLDivElement | null>) {
       const value = style.getPropertyValue('--panel-motion-duration').trim();
       const duration = parseFloat(value) * (value.endsWith('ms') ? 1 : 1000) || 240;
       const easing = style.getPropertyValue('--panel-motion-easing').trim() || 'cubic-bezier(0.2, 0, 0, 1)';
-      for (const { node, previous, top, height, resizing, jump, offset } of measured) {
+      for (const { node, previous, top, height, resizing, jump, offset, running } of measured) {
         const position = previous ?? { top, height, resizing };
         Object.assign(position, { top, height, resizing });
         positions.set(node, position);
@@ -57,11 +60,13 @@ export function useNoticeStackMotion(ref: RefObject<HTMLDivElement | null>) {
           position.animation = undefined;
         } else if (Math.abs(jump) >= 0.5) {
           position.animation?.cancel();
+          const start = jump + offset;
           const animation = node.animate([
-            { transform: `translateY(${jump + offset}px)` },
+            { transform: `translateY(${start}px)` },
             { transform: 'translateY(0px)' },
-          ], { duration, easing, fill: 'both' });
+          ], { ...continuedTiming({ duration, easing }, running, [-start]), fill: 'both' });
           position.animation = animation;
+          position.start = start;
           const finish = () => {
             if (position.animation !== animation) return;
             animation.cancel();

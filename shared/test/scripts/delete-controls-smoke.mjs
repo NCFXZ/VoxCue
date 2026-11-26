@@ -368,10 +368,29 @@ try {
   assert.equal(await page.locator('.chat-attachment').count(), 1);
   await second('附件：附件.txt').click();
   await page.locator('.chat-attachment').waitFor({ state: 'detached' });
-  await page.getByRole('button', { name: '移除简历', exact: true }).click();
-  assert.equal(await page.locator('.resume-chip').count(), 1);
-  await second('简历原件：旧简历.txt').click();
-  await page.locator('.resume-chip').waitFor({ state: 'detached' });
+  assert.equal(await page.locator('.resume-chip').count(), 0);
+  assert.equal(await page.getByRole('button', { name: '移除简历', exact: true }).count(), 0);
+  assert.deepEqual(await page.evaluate(async () => {
+    const db = await new Promise((resolve, reject) => {
+      const request = indexedDB.open('copilot-local-documents');
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    try {
+      const original = await new Promise((resolve, reject) => {
+        const request = db.transaction('documents').objectStore('documents').get('legacy-resume');
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      return original ? {
+        id: original.id, baseId: original.baseId, name: original.name, content: await original.blob.text(),
+      } : null;
+    } finally {
+      db.close();
+    }
+  }), {
+    id: 'legacy-resume', baseId: 'personal-resume', name: '旧简历.txt', content: 'Synthetic original only',
+  }, 'Removing the obsolete composer chip preserves the saved resume original');
   await page.getByRole('textbox', { name: '聊天消息', exact: true }).fill('未发送待删除对话');
   await page.getByRole('button', { name: '新对话', exact: true }).click();
   const row = page.locator('.conversation-row').filter({ hasText: '未发送待删除对话' });
@@ -404,7 +423,7 @@ try {
   await second('对话：未发送待删除对话').click();
   await row.waitFor({ state: 'detached' });
   checks.push(
-    'attachments, preserved resume originals and conversations require a second click on the initiating button',
+    'attachments and conversations require a second click; the obsolete resume chip is absent and its original stays saved',
   );
   await page.getByRole('button', { name: '知识库', exact: true }).click();
   await page.locator('.knowledge-card').filter({ hasText: '待删资料' }).click();

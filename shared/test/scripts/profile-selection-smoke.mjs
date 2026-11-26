@@ -381,6 +381,8 @@ try {
   const checkReaderHeader = async (reader) => {
     const heading = reader.locator(':scope > .dialog-heading');
     const scroll = reader.locator('.dialog-scroll');
+    // The dialog rises into place on entry; measure the settled header.
+    await reader.evaluate((node) => Promise.allSettled(node.getAnimations().map((animation) => animation.finished)));
     const before = await heading.boundingBox();
     await scroll.evaluate(async (node) => {
       node.scrollTop = node.scrollHeight;

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -11,6 +12,12 @@ const root = path.resolve(process.env.VOXCUE_TEST_SERVER_ROOT ??
 const manifest = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
 assert.equal(manifest.name, 'voxcue-account-server');
 assert.equal(manifest.version, '0.6.1');
+const revision = '3440a2517ad3e4d2ee486c76023d229a0ec17fa8';
+const git = (...args) => execFileSync('git', ['-C', root, ...args], { encoding: 'utf8' }).trim();
+if (git('rev-parse', 'HEAD') !== revision || git('status', '--porcelain', '--untracked-files=no'))
+  throw Error(
+    'Client integration requires the unchanged 0.6.1 server 3440a25 reference. Set VOXCUE_TEST_SERVER_ROOT to that checkout; do not modify the server.',
+  );
 const load = (name) => import(pathToFileURL(path.join(root, 'src', name + '.ts')).href);
 export const { Store } = await load('store');
 export const { Auth } = await load('auth');

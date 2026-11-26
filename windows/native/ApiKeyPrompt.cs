@@ -12,12 +12,14 @@ using System.Windows.Forms;
 sealed class ApiKeyPrompt : Panel, IMessageFilter {
   const int WS_CHILD = 0x40000000, WS_CLIPCHILDREN = 0x02000000, WM_KEYDOWN = 0x0100;
   const int SWP_NOSIZE = 0x0001, SWP_NOMOVE = 0x0002, SWP_NOACTIVATE = 0x0010, SWP_SHOWWINDOW = 0x0040;
+  const uint RDW_INVALIDATE = 0x0001, RDW_ERASE = 0x0004, RDW_ALLCHILDREN = 0x0080, RDW_UPDATENOW = 0x0100;
   const char PasswordBullet = '\u25CF';
   [StructLayout(LayoutKind.Sequential)] struct Rect { public int Left, Top, Right, Bottom; }
   [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
   [DllImport("user32.dll")] static extern IntPtr GetParent(IntPtr hwnd);
   [DllImport("user32.dll")] static extern bool GetClientRect(IntPtr hwnd, out Rect rect);
   [DllImport("user32.dll")] static extern bool SetLayeredWindowAttributes(IntPtr hwnd, uint key, byte opacity, uint flags);
+  [DllImport("user32.dll")] static extern bool RedrawWindow(IntPtr hwnd, IntPtr rect, IntPtr region, uint flags);
   [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
   [DllImport("user32.dll")] static extern IntPtr GetWindowDpiAwarenessContext(IntPtr hwnd);
   [DllImport("user32.dll")] static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
@@ -56,7 +58,6 @@ sealed class ApiKeyPrompt : Panel, IMessageFilter {
     MouseDown += delegate { input.Focus(); };
     Visible = false;
     if (GetParent(Handle) != parent) throw new InvalidOperationException("Owner HWND mismatch");
-    if (!SetLayeredWindowAttributes(Handle, 0, 255, 2)) throw new InvalidOperationException("Cannot compose native input");
     monitor.Tick += delegate {
       if (!OwnedBy(parent, process)) Finish(false);
       else if (dpi != 0 && dpi != GetDpiForWindow(parent)) Position();
@@ -135,9 +136,17 @@ sealed class ApiKeyPrompt : Panel, IMessageFilter {
     }
     var line = Math.Min(h, input.PreferredHeight + 2);
     input.SetBounds(0, (h - line) / 2, w, line);
-    if (!Visible) { Bounds = new Rectangle(x, y, w, h); Show(); }
+    bool showing = !Visible;
+    if (showing) {
+      if (!SetLayeredWindowAttributes(Handle, 0, 0, 2)) throw new InvalidOperationException("Cannot compose native input");
+      Bounds = new Rectangle(x, y, w, h);
+      Show();
+    }
     if (!SetWindowPos(Handle, IntPtr.Zero, x, y, w, h, SWP_SHOWWINDOW | SWP_NOACTIVATE))
       { Finish(false); return; }
+    // Present the layered child only after both the panel and the edit have painted their theme.
+    if (showing && (!RedrawWindow(Handle, IntPtr.Zero, IntPtr.Zero, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW)
+        || !SetLayeredWindowAttributes(Handle, 0, 255, 2))) throw new InvalidOperationException("Cannot present native input");
     // An offscreen layout while the dialog is opening has not presented an editor yet.
     if (!ready && GetForegroundWindow() == parent) input.Focus();
     ready = true;

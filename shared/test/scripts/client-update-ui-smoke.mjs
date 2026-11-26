@@ -31,7 +31,9 @@ try {
     page.evaluate(
       async ({ selector, button }) => {
         const node = document.querySelector(selector),
-          widths = [node.getBoundingClientRect().width];
+          composer = document.querySelector('.composer-area'),
+          widths = [node.getBoundingClientRect().width],
+          composerWidths = [composer.getBoundingClientRect().width];
         const style = getComputedStyle(node),
           duration = style.transitionDuration,
           easing = style.transitionTimingFunction;
@@ -40,8 +42,9 @@ try {
         while (performance.now() - start < 320) {
           await new Promise(requestAnimationFrame);
           widths.push(node.getBoundingClientRect().width);
+          composerWidths.push(composer.getBoundingClientRect().width);
         }
-        return { widths, duration, easing };
+        return { widths, composerWidths, duration, easing };
       },
       { selector, button },
     );
@@ -73,6 +76,14 @@ try {
           assert.ok(
             result.widths.some((x) => x > Math.min(a, b) + 2 && x < Math.max(a, b) - 2),
             'Real intermediate animation frames required',
+          );
+          // The composer follows the narrowing column instead of switching widths on the first frame.
+          const total = result.composerWidths.at(-1) - result.composerWidths[0];
+          assert.ok(
+            result.composerWidths.every(
+              (x, index) => !index || (x - result.composerWidths[index - 1]) * Math.sign(total) >= -0.5,
+            ),
+            'Composer width must move with the panel without reversing: ' + JSON.stringify(result),
           );
         }
       for (const reduced of [false, true]) {

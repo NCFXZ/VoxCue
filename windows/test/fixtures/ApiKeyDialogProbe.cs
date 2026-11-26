@@ -209,7 +209,14 @@ sealed class ApiKeyDialogProbe {
         }
         var glyphs=Glyphs(image,field,caret,args[4]=="dark");
         var description=string.Join(",",glyphs.Select(g=>g.Width+"x"+g.Height));
-        if(op=="empty") Require(glyphs.Length==0,"Empty field contains foreground ink: "+description);
+        if(op=="empty") {
+          Require(glyphs.Length==0,"Empty field contains foreground ink: "+description);
+          int y=field.Top+field.Height/2;
+          var inside=image.GetPixel(field.Right-7,y);
+          var framePadding=image.GetPixel(field.Left-4,y);
+          Require(Math.Abs(inside.R-framePadding.R)<=2 && Math.Abs(inside.G-framePadding.G)<=2 &&
+            Math.Abs(inside.B-framePadding.B)<=2,"Native editor background differs from the surrounding input frame");
+        }
         if(op=="masked" && !Dots(glyphs))
           throw new InvalidOperationException("Expected six visible, equally spaced password dots; composed ink="+description+
             ", "+State(edit,args[4]=="dark")+", frame="+frame+", caret="+caret);

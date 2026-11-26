@@ -97,6 +97,30 @@ const waitKeysReleased = () =>
     }
     throw Error('Closed interview retained its owned global shortcuts');
   });
+const waitNewInterview = async (previous, stage) => {
+  const deadline = Date.now() + 15000;
+  while (Date.now() < deadline) {
+    // A reveal also opens shortcut help; its Page event is not an interview owner.
+    const page = app.windows().find(page =>
+      !previous.has(page) && !page.isClosed() && page.url().endsWith('#interview'),
+    );
+    if (page) {
+      const handle = await app.browserWindow(page);
+      try {
+        console.log('Owned interview window:', {
+          stage,
+          ...await handle.evaluate(win => ({ id: win.id, contents: win.webContents.id })),
+          url: page.url(),
+        });
+      } finally {
+        await handle.dispose();
+      }
+      return page;
+    }
+    await new Promise(resolve => setTimeout(resolve, 20));
+  }
+  throw Error('New interview owner did not appear: ' + stage);
+};
 const nativeWindows = () =>
   app.evaluate(({ BrowserWindow }) =>
     ['#interview', '#interview-shortcuts'].map((hash) => {
@@ -357,13 +381,36 @@ try {
     throw Error('Shortcut helper did not appear');
   };
   let help = await findHelp();
+  const helpIdentity = async () => ({
+    native: await (await app.browserWindow(helpPage)).evaluate(win => ({ id: win.id, contents: win.webContents.id })),
+    document: await helpPage.evaluate(() => window.shortcutHelpDocument ??= crypto.randomUUID()),
+    revision: (await helpPage.evaluate(() => window.desktop.interviewShortcutsState())).rendererRevision,
+  });
+  const waitHelpVisible = visible => app.evaluate(async ({ BrowserWindow }, visible) => {
+    const deadline = Date.now() + 3000;
+    while (Date.now() < deadline) {
+      const win = BrowserWindow.getAllWindows().find(win => win.webContents.getURL().endsWith('#interview-shortcuts'));
+      if (!win || win.isDestroyed()) throw Error('Hiding shortcut help must retain its owning interview window');
+      if (win.isVisible() === visible && Math.abs(win.getOpacity() - 1) < 0.01) return;
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    throw Error('Shortcut helper visibility did not settle');
+  }, visible);
   assert.equal(await shortcutsToggle.getAttribute('aria-pressed'), 'true');
-  const closedWithKey = helpPage.waitForEvent('close');
+  const retainedHelp = await helpIdentity();
   await invoke('Control+Shift+/');
-  await closedWithKey;
+  await waitHelpVisible(false);
   assert.equal(await shortcutsToggle.getAttribute('aria-pressed'), 'false');
   await invoke('Control+Shift+/');
+  await waitHelpVisible(true);
   help = await findHelp();
+  assert.deepEqual(await helpIdentity(), retainedHelp, 'Reopening help reuses its ready native window and renderer');
+  await floating.evaluate(async () => {
+    await window.desktop.setInterviewShortcutsOpen(false);
+    await window.desktop.setInterviewShortcutsOpen(true);
+  });
+  await waitHelpVisible(true);
+  assert.deepEqual(await helpIdentity(), retainedHelp, 'A rapid hide/show cannot retire or reload the newly shown helper');
   const helpLabel = async (action, label, width) => {
     await helpPage.waitForFunction(
       ({ action, label }) =>
@@ -683,11 +730,13 @@ try {
       probe('move', point.x, point.y);
       await waitPass(false);
       assert.equal(probe('hit', handles.helper, point.x, point.y).expected, true);
-      const closed = helpPage.waitForEvent('close');
+      const retained = await helpIdentity();
       probe('click', handles.helper, point.x, point.y);
-      await closed;
+      await waitHelpVisible(false);
       await floating.evaluate(() => window.desktop.setInterviewShortcutsOpen(true));
+      await waitHelpVisible(true);
       help = await findHelp();
+      assert.deepEqual(await helpIdentity(), retained, 'The native close button hides and reuses the ready helper');
       console.log(
         'PASS: Windows help native click-through to an owned surface, native close button and reopen',
       );
@@ -1172,29 +1221,39 @@ try {
     Math.abs((await help.boundingBox()).width - compact.width) <= 1 / 64,
     'Returning to Chinese tightens the help again',
   );
-  const helperClosed = helpPage.waitForEvent('close');
-  await helpPage.keyboard.press('Escape').catch((error) => {
-    if (!helpPage.isClosed()) throw error;
-  });
-  await helperClosed;
+  const retainedAfterReload = await helpIdentity();
+  await helpPage.keyboard.press('Escape');
+  await waitHelpVisible(false);
   await floating.waitForFunction(
     () =>
       document.querySelector('.floating-shortcuts-toggle')?.getAttribute('aria-pressed') ===
       'false',
   );
   await shortcutsToggle.click();
+  await waitHelpVisible(true);
   help = await findHelp();
+  assert.deepEqual(await helpIdentity(), retainedAfterReload, 'The toolbar reopens the hidden help without a loading handshake');
   await floating.getByRole('button', { name: '结束面试', exact: true }).click();
   const closed = floating.waitForEvent('close');
+  const helperClosed = helpPage.waitForEvent('close');
   await floating.getByRole('button', { name: '确认结束面试', exact: true }).click();
-  await closed;
+  await Promise.all([closed, helperClosed]);
   await waitKeysReleased();
+  assert.equal(helpPage.isClosed(), true, 'Ending the interview destroys its retained shortcut helper');
   assert.deepEqual(await keyState(), Array(10).fill(false));
   await main.locator('.interview-start-trigger').click();
-  const beforeMode = await start.boundingBox();
+  const settledStartBounds = async () => {
+    await start.locator('.interview-access[aria-busy="false"]').waitFor();
+    await start.evaluate(node => Promise.allSettled(
+      node.getAnimations({ subtree: true })
+        .filter(animation => Number.isFinite(animation.effect?.getComputedTiming().endTime))
+        .map(animation => animation.finished),
+    ));
+    return start.boundingBox();
+  };
+  const beforeMode = await settledStartBounds();
   await start.getByRole('radio', { name: '现场面试', exact: true }).click();
-  await start.locator('.interview-access[aria-busy="false"]').waitFor();
-  assert.equal((await start.boundingBox()).height, beforeMode.height);
+  assert.equal((await settledStartBounds()).height, beforeMode.height);
   await footerAtBottom();
   const footerBeforeScroll = await start.locator(':scope > .modal-footer').boundingBox();
   await start.locator(':scope > .dialog-scroll').evaluate((node) => {
@@ -1316,10 +1375,63 @@ try {
   await microphone.getByRole('button', { name: '确认结束面试', exact: true }).click();
   await microphoneClosed;
   await waitKeysReleased();
-  const reopened = app.waitForEvent('window');
+  const beforeReentrant = new Set(app.windows());
   await main.evaluate((value) => window.desktop.openInterview(value), configuration);
-  const failed = await reopened;
+  const reentrant = await waitNewInterview(beforeReentrant, 'speech-owner retirement');
+  reentrant.setDefaultTimeout(15000);
+  reentrant.on('pageerror', error => errors.push(error.message));
+  await reentrant.locator('.floating-toolbar').waitFor();
+  await app.evaluate(() => {
+    const at = Date.now();
+    globalThis.shortcutUi.speechHost.emit({ type: 'segment', segment: {
+      id: 'synthetic-active-owner', source: 'system', text: 'Synthetic active owner event',
+      final: true, startMs: at - 1000, endMs: at, reason: 'silence',
+    } });
+  });
+  await reentrant.locator('.transcript-item p').getByText('Synthetic active owner event', { exact: true }).waitFor();
+  const reentrantClosed = reentrant.waitForEvent('close');
+  const retirement = await app.evaluate(({ app, BrowserWindow }) => {
+    const load = process.getBuiltinModule('module').createRequire(app.getAppPath() + '/package.json');
+    const { SpeechCoordinator } = load(app.getAppPath() + '/dist-electron/shared/electron/application/speech.js');
+    const { InterviewContext } = load(app.getAppPath() + '/dist-electron/shared/electron/application/interviewContext.js');
+    const owner = BrowserWindow.getAllWindows().find(win => win.webContents.getURL().endsWith('#interview'));
+    if (!owner) throw Error('Synthetic reentrant speech check has no interview owner');
+    const blocksInput = SpeechCoordinator.prototype.blocksInput, contextEvent = InterviewContext.prototype.event;
+    let triggered = false, retiredContextEvents = 0;
+    SpeechCoordinator.prototype.blocksInput = function(event) {
+      if (event.type === 'segment' && event.segment.id === 'synthetic-retired-owner') {
+        triggered = true;
+        owner.destroy();
+      }
+      return blocksInput.call(this, event);
+    };
+    InterviewContext.prototype.event = function(event, ...args) {
+      if (event.type === 'segment' && event.segment.id === 'synthetic-retired-owner') retiredContextEvents++;
+      return contextEvent.call(this, event, ...args);
+    };
+    try {
+      const at = Date.now();
+      globalThis.shortcutUi.speechHost.emit({ type: 'segment', segment: {
+        id: 'synthetic-retired-owner', source: 'system', text: 'Synthetic retired owner event',
+        final: true, startMs: at - 1000, endMs: at, reason: 'silence',
+      } });
+      return { triggered, retiredContextEvents, destroyed: owner.isDestroyed() };
+    } finally {
+      SpeechCoordinator.prototype.blocksInput = blocksInput;
+      InterviewContext.prototype.event = contextEvent;
+    }
+  });
+  assert.deepEqual(retirement, { triggered: true, retiredContextEvents: 0, destroyed: true });
+  await reentrantClosed;
+  await waitKeysReleased();
+  assert.deepEqual(await app.evaluate(() => globalThis.shortcutUi.uncaught), []);
+  assert.deepEqual(errors, []);
+  const beforeFailed = new Set(app.windows());
+  await main.evaluate((value) => window.desktop.openInterview(value), configuration);
+  const failed = await waitNewInterview(beforeFailed, 'failed-load cleanup');
+  failed.on('pageerror', error => errors.push(error.message));
   await failed.locator('.floating-toolbar').waitFor();
+  assert.equal(await failed.getByText('Synthetic retired owner event', { exact: true }).count(), 0);
   const failedClosed = failed.waitForEvent('close');
   await app.evaluate(({ BrowserWindow }) => {
     globalThis.shortcutUi.windowErrors = [];
@@ -1352,7 +1464,7 @@ try {
   assert.deepEqual(await app.evaluate(() => globalThis.shortcutUi.uncaught), []);
   assert.deepEqual(errors, []);
   console.log(
-    'PASS: isolated remote/transcription configurable shortcuts, hidden microphone toggle, microphone draft/1000ms answer, disabled system settings, default screen-bottom-left help, matching toggles, native fade/reversal/reduced motion, panel preferences, opacity/language, renderer revisions and owned-window cleanup. No hardware or real credentials.',
+    'PASS: isolated remote/transcription configurable shortcuts, hidden microphone toggle, microphone draft/1000ms answer, disabled system settings, default screen-bottom-left help, matching toggles, native fade/reversal/reduced motion, panel preferences, opacity/language, renderer revisions, reentrant speech-owner retirement and owned-window cleanup. No hardware or real credentials.',
   );
 } catch (error) {
   console.error('Interview shortcuts failed before teardown:', error);

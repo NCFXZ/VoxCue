@@ -1,5 +1,14 @@
+/// <reference lib="es2023.intl" />
 import { t, uiLocale } from '../i18n';
 import type { AccountQuota, AccountUsage } from '../../electron/contracts/accountUsage';
+import type { ApiBalance } from '../../electron/contracts/apiConnections';
+
+export function formatApiBalance({ total, currency }: ApiBalance) {
+  const amount = new Intl.NumberFormat(uiLocale(), {
+    minimumFractionDigits: 2, maximumFractionDigits: 2, useGrouping: false, signDisplay: 'negative',
+  }).format(total as `${number}`);
+  return `${amount} ${currency}`;
+}
 
 export function orderedAccountQuotas(quotas: readonly AccountQuota[]) {
   return [...quotas].sort((a, b) => Number(isFiveHourQuota(b)) - Number(isFiveHourQuota(a)));

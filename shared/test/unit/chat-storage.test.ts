@@ -3,6 +3,70 @@ import { IDBFactory } from 'fake-indexeddb';
 import { expect, it, vi } from 'vitest';
 import { localChats, openChatDatabase, transferStoredChats, type ChatSnapshot } from '../../../shared/src/services/chats';
 
+it('stores grounded answer text and its timestamp without Google suggestions or search metadata', async () => {
+  vi.stubGlobal('indexedDB', new IDBFactory());
+  const now = Date.now();
+  const snapshot: ChatSnapshot = {
+    conversations: [{ id: 'grounded', title: '合成搜索', messages: [{
+      id: 'google-answer', role: 'assistant', status: 'completed', content: '保留给用户查看的回答',
+      googleSearchGroundedAt: now, googleSearchSuggestions: '<div>transient-google-widget</div>',
+      sources: [{ title: 'transient-source', url: 'https://example.com/transient-source' }],
+      reasoningSummary: 'transient-reasoning',
+      activity: { kind: 'web_search', phase: 'searching', status: 'completed', detail: 'transient-query' },
+      activities: [{ id: 'google-query', kind: 'web_search', phase: 'searching', status: 'completed', detail: 'transient-query-log' }],
+    }] }], activeConversation: 'grounded', draft: '后续草稿', attachments: [], modelId: 'gemini-4-hydrogen',
+    effort: 'auto', webSearch: true,
+  };
+  try {
+    await localChats.write(snapshot);
+    const restored = (await localChats.read())!;
+    expect(restored.conversations[0].messages[0]).toMatchObject({
+      content: '保留给用户查看的回答', googleSearchGroundedAt: now,
+    });
+    const db = await openChatDatabase();
+    try {
+      const request = db.transaction('state').objectStore('state').get(['conversation', 'grounded']);
+      const row = await new Promise<unknown>((resolve, reject) => {
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      expect(JSON.stringify(row)).not.toContain('transient-');
+    } finally { db.close(); }
+  } finally { vi.unstubAllGlobals(); }
+});
+
+it('prunes a marked grounded assistant after two years on read while preserving its user question and unmarked history', async () => {
+  vi.stubGlobal('indexedDB', new IDBFactory());
+  const clock = vi.spyOn(Date, 'now');
+  const created = 1_800_000_000_000;
+  const lifetime = 730 * 24 * 60 * 60 * 1000;
+  clock.mockReturnValue(created);
+  const snapshot: ChatSnapshot = {
+    conversations: [{ id: 'history', title: '合成历史', messages: [
+      { id: 'question', role: 'user', content: '保留原问题' },
+      { id: 'grounded-answer', role: 'assistant', content: 'expired-grounded-answer', googleSearchGroundedAt: created },
+      { id: 'legacy-answer', role: 'assistant', content: '保留旧版普通回答' },
+    ] }], activeConversation: 'history', draft: '保留草稿', attachments: [], modelId: 'test',
+    effort: 'auto', webSearch: true,
+  };
+  try {
+    await localChats.write(snapshot);
+    clock.mockReturnValue(created + lifetime);
+    expect((await localChats.read())?.conversations[0].messages).toHaveLength(3);
+    clock.mockReturnValue(created + lifetime + 1);
+    const restored = (await localChats.read())!;
+    expect(restored.conversations[0].messages.map(message => message.id)).toEqual(['question', 'legacy-answer']);
+    expect(restored.draft).toBe('保留草稿');
+    const db = await openChatDatabase();
+    try {
+      expect(JSON.stringify(await transferStoredChats(db))).not.toContain('expired-grounded-answer');
+    } finally { db.close(); }
+  } finally {
+    clock.mockRestore();
+    vi.unstubAllGlobals();
+  }
+});
+
 it('连续重载和迁移均保留尚未写入主目录的新会话、消息、附件和多行草稿', async () => {
   vi.stubGlobal('indexedDB', new IDBFactory());
   const view = new EventTarget();
@@ -46,6 +110,117 @@ it('连续重载和迁移均保留尚未写入主目录的新会话、消息、�
   }
 });
 
+it('retires an older write before its directory requests resolve and commits the newest messages, draft and originals', async () => {
+  vi.stubGlobal('indexedDB', new IDBFactory());
+  const view = new EventTarget();
+  vi.stubGlobal('window', view);
+  const first = new File(['retained original'], 'first.txt');
+  const original = { id: 'retained', name: first.name, size: first.size, file: first };
+  const base: ChatSnapshot = {
+    activeConversation: 'active', draft: 'old', attachments: [original], modelId: '', effort: 'auto', webSearch: true,
+    conversations: [
+      { id: 'active', title: 'Synthetic chat', draft: 'old', attachments: [original], messages: [] },
+      { id: 'history', title: 'Unchanged history', messages: [{ id: 'history-message', role: 'user', content: 'Retain unchanged history' }] },
+    ],
+  };
+  const get = IDBObjectStore.prototype.get;
+  const reads = vi.spyOn(IDBObjectStore.prototype, 'get');
+  try {
+    await localChats.write(base);
+    let latest = base, previous: ChatSnapshot['conversations'];
+    const restored = (await localChats.read(() => ({ snapshot: latest, previous, writing: true })))!;
+    previous = restored.conversations;
+    const second = new File(['new original'], 'second.txt');
+    const added = { id: 'added', name: second.name, size: second.size, file: second };
+    const attachments = [...restored.attachments, added];
+    latest = { ...restored, draft: 'new\nlatest', attachments, conversations: restored.conversations.map(row => row.id !== 'active' ? row : ({
+      ...row, draft: 'new\nlatest', attachments, messages: [{ id: 'new-message', role: 'user', content: 'Retain newest message' }],
+    })) };
+    let directoryRead = false;
+    reads.mockImplementation(function(key) {
+      const request = get.call(this, key);
+      if (this.name === 'state' && key === 'current')
+        request.addEventListener('success', () => { directoryRead = true; });
+      return request;
+    });
+    const older = localChats.write(restored, restored.conversations).then(() => undefined, error => error);
+    expect(directoryRead).toBe(false);
+    view.dispatchEvent(new Event('pagehide'));
+    expect(await older).toMatchObject({ cause: { name: 'AbortError' } });
+    const db = await openChatDatabase();
+    try {
+      const request = db.transaction('state').objectStore('state').get('reload-checkpoint-v1');
+      const checkpoint = await new Promise<{ conversations: unknown[] }>((resolve, reject) => {
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      expect(checkpoint.conversations[1]).toBe('history');
+    } finally { db.close(); }
+    const recovered = (await localChats.read())!;
+    expect(recovered.draft).toBe('new\nlatest');
+    expect(recovered.conversations[0]).toMatchObject({ draft: 'new\nlatest', messages: [{ id: 'new-message' }] });
+    expect(recovered.conversations[1].messages).toEqual(base.conversations[1].messages);
+    expect(await Promise.all(recovered.attachments.map(async item => (await localChats.readFile(item)).text())))
+      .toEqual(['retained original', 'new original']);
+  } finally {
+    reads.mockRestore();
+    view.dispatchEvent(new Event('pagehide'));
+    vi.unstubAllGlobals();
+  }
+});
+
+it.each(['committing', 'finished'])('checkpoints rows and originals when an older %s write has changed the previous base', async phase => {
+  vi.stubGlobal('indexedDB', new IDBFactory());
+  const view = new EventTarget();
+  vi.stubGlobal('window', view);
+  const file = new File(['restore removed original'], 'restore.txt');
+  const original = { id: 'restore-original', name: file.name, size: file.size, file };
+  const base: ChatSnapshot = {
+    activeConversation: 'restore', draft: 'Restore this draft', attachments: [original], modelId: '', effort: 'auto', webSearch: true,
+    conversations: [
+      { id: 'restore', title: 'Restore this row', draft: 'Restore this draft', attachments: [original],
+        messages: [{ id: 'restore-message', role: 'user', content: 'Restore this message' }] },
+      { id: 'other', title: 'Other row', messages: [] },
+    ],
+  };
+  const put = IDBObjectStore.prototype.put;
+  const puts = vi.spyOn(IDBObjectStore.prototype, 'put');
+  try {
+    await localChats.write(base);
+    let latest = base;
+    const restored = (await localChats.read(() => ({ snapshot: latest, previous: latest.conversations, writing: true })))!;
+    latest = restored;
+    let retired = false;
+    puts.mockImplementation(function(value, key) {
+      const request = put.call(this, value, key);
+      if (this.name === 'state' && key === 'current' && !retired) {
+        const tx = this.transaction;
+        const retire = () => {
+          retired = true;
+          if (phase === 'committing') tx.commit();
+          view.dispatchEvent(new Event('pagehide'));
+        };
+        if (phase === 'committing') request.addEventListener('success', retire, { once: true });
+        else tx.addEventListener('complete', retire, { once: true });
+      }
+      return request;
+    });
+    await localChats.write({ ...restored, activeConversation: 'other', draft: 'Superseded draft', attachments: [],
+      conversations: restored.conversations.filter(row => row.id !== 'restore') }, restored.conversations);
+    expect(retired).toBe(true);
+    const recovered = (await localChats.read())!;
+    expect(recovered.activeConversation).toBe('restore');
+    expect(recovered.draft).toBe('Restore this draft');
+    expect(recovered.conversations[0]).toMatchObject({ id: 'restore',
+      messages: [{ id: 'restore-message', content: 'Restore this message' }] });
+    expect(await (await localChats.readFile(recovered.attachments[0])).text()).toBe('restore removed original');
+  } finally {
+    puts.mockRestore();
+    view.dispatchEvent(new Event('pagehide'));
+    vi.unstubAllGlobals();
+  }
+});
+
 it.each(['before-directory-read', 'after-delete-request'])('reloading a metadata-only draft preserves its original against an older write at %s', async phase => {
   vi.stubGlobal('indexedDB', new IDBFactory());
   const view = new EventTarget();
@@ -68,9 +243,9 @@ it.each(['before-directory-read', 'after-delete-request'])('reloading a metadata
         view.dispatchEvent(new Event('pagehide'));
       return request;
     });
-    const older = localChats.write({ ...base, attachments: [], draft: '' });
+    const older = localChats.write({ ...base, attachments: [], draft: '' }).then(() => undefined, error => error);
     if (phase === 'before-directory-read') view.dispatchEvent(new Event('pagehide'));
-    await older;
+    expect(await older).toMatchObject({ message: '聊天保存失败，请检查本机存储空间后重试。' });
     const recovered = (await localChats.read())!;
     expect(recovered.draft).toBe('刚粘贴的草稿');
     expect(await (await localChats.readFile(recovered.attachments[0])).text()).toBe('my notes');

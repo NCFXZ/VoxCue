@@ -1,7 +1,7 @@
 import { InterviewReveal } from './InterviewReveal';
 import { useInterviewAudioPreview } from './InterviewAudioPreview';
 import { t, uiLocale } from '../i18n';
-import { isApiProvider, type ApiBalance } from '../../electron/contracts/apiConnections';
+import { apiProviders, isApiProvider, type ApiBalance, type ApiProvider } from '../../electron/contracts/apiConnections';
 import { hasReadySpeechModel, type ComponentId } from '../../electron/contracts/components';
 import { useTextareaSize } from './useTextareaSize';
 import { playSentMessageEnter } from '../lib/messageMotion';
@@ -23,7 +23,6 @@ import { AnnouncementNotice } from './AnnouncementNotice';
 import type { AnnouncementTarget } from '../../electron/contracts/announcements';
 import {
   ArrowUp,
-  MessageSquare,
   Square,
   X,
   Person,
@@ -35,7 +34,6 @@ import {
   FileText,
 } from './icons';
 import { Button } from './ui/button';
-import { ConfirmDeleteButton } from './ui/confirm-delete-button';
 import { usePreparation } from '../stores/preparation';
 import { useRemoteConnection } from '../stores/remoteConnection';
 import { useAuth } from '../stores/auth';
@@ -217,18 +215,19 @@ export function PreparationPage({
     };
   }, []);
   const [confirmInterview, setConfirmInterview] = useState(false);
-  const [deepSeekBalances, setDeepSeekBalances] = useState<ApiBalance[] | null>();
-  const readDeepSeekBalance = confirmInterview && connection.live && connection.service === 'deepseek';
+  const [balanceResult, setBalanceResult] = useState<{ provider: ApiProvider; balances: ApiBalance[] }>();
+  const balanceProvider = confirmInterview && connection.live && isApiProvider(connection.service)
+    && apiProviders[connection.service].balance ? connection.service : undefined;
   useEffect(() => {
-    setDeepSeekBalances(undefined);
-    if (!readDeepSeekBalance) return;
+    setBalanceResult(undefined);
+    if (!balanceProvider) return;
     let current = true;
-    void apiConnections.balance('deepseek').then(
-      (balances) => { if (current) setDeepSeekBalances(balances); },
-      () => { if (current) setDeepSeekBalances(null); },
+    void apiConnections.balance(balanceProvider).then(
+      (balances) => { if (current) setBalanceResult({ provider: balanceProvider, balances }); },
+      () => {}, // The billing label stays visible when the balance is unavailable.
     );
     return () => { current = false; };
-  }, [readDeepSeekBalance]);
+  }, [balanceProvider]);
   const [openingInterview, setOpeningInterview] = useState(false);
   const [interviewError, setInterviewError] = useState<string | null>(null);
   const [interviewDevices, setInterviewDevices] = useState<AudioDevice[]>([]);
@@ -677,7 +676,7 @@ export function PreparationPage({
                 </div>
                 {connection.live && !connection.loadingUsage && isApiProvider(connection.service) ? (
                   <InterviewApiBillingRow provider={connection.service}
-                    balances={connection.service === 'deepseek' ? deepSeekBalances : undefined} />
+                    balances={balanceResult?.provider === connection.service ? balanceResult.balances : undefined} />
                 ) : (
                   <div>
                     <dt>{connection.live && usageSummary ? usageSummary.title : t('AI 服务用量')}</dt>
@@ -956,22 +955,6 @@ export function PreparationPage({
               busy={state.streaming}
               onClick={chatScroll.scrollToLatest}
             />
-            {state.resume && (
-              <div className="resume-chip">
-                <MessageSquare size={14} />
-                <span>{state.resume.name}</span>
-                <small>{t('个人简历 · 保存在本机')}</small>
-                <ConfirmDeleteButton
-                  iconOnly
-                  label={t('移除')}
-                  target={t('简历原件：') + state.resume.name}
-                  revision={state.resume.id}
-                  aria-label={t('移除简历')}
-                  warning={t('将删除保存的简历原件，摘要会保留')}
-                  onConfirm={state.removeResume}
-                />
-              </div>
-            )}
             <div className="preparation-notices">
               <InterviewReveal resizeKey={visibleError || 'offline'}>
                 {(visibleError || (authResolved && !connection.live)) ? (

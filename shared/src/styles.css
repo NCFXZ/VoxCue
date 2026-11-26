@@ -67,8 +67,17 @@
   --line-secondary: 1.6;
   --panel-motion-duration: 240ms;
   --panel-motion-easing: cubic-bezier(0.2, 0, 0, 1);
+  /* Exits leave sooner than entries. Larger morphs settle on a decelerating curve. */
+  --panel-motion-exit-duration: 180ms;
+  --panel-motion-emphasized-easing: cubic-bezier(0.22, 1, 0.36, 1);
+  /* Outgoing content clears within this share of a motion; incoming content waits this share. */
+  --fade-out-share: 0.4;
+  --fade-in-delay-share: 0.15;
   --button-morph-duration: 220ms;
-  --button-morph-easing: ease;
+  --button-morph-easing: var(--panel-motion-easing);
+  --button-morph-fade-out: calc(var(--button-morph-duration) * var(--fade-out-share));
+  --button-morph-fade-in-delay: calc(var(--button-morph-duration) * var(--fade-in-delay-share));
+  --button-morph-fade-in: calc(var(--button-morph-duration) - var(--button-morph-fade-in-delay));
   --button-morph-shift: 3px;
   font-size: var(--type-body);
   font-weight: 400;
@@ -816,12 +825,14 @@ p {
   opacity: 1;
   transform: translateY(0);
   visibility: visible;
-  transition-delay: 0s;
+  transition-duration: var(--button-morph-fade-in), var(--button-morph-duration), 0s;
+  transition-delay: var(--button-morph-fade-in-delay), 0s, 0s;
 }
 :root .sidebar .sidebar-update.ui-button :is(.sidebar-update-expanded, .download-button-cancel) {
   opacity: 0;
   transform: translateY(var(--button-morph-shift));
   visibility: hidden;
+  transition-duration: var(--button-morph-fade-out), var(--button-morph-duration), 0s;
 }
 :root
   .sidebar:not(.collapsed)
@@ -834,6 +845,7 @@ p {
   opacity: 0;
   transform: translateY(calc(-1 * var(--button-morph-shift)));
   visibility: hidden;
+  transition-duration: var(--button-morph-fade-out), var(--button-morph-duration), 0s;
   transition-delay: 0s, 0s, var(--button-morph-duration);
 }
 :root
@@ -847,7 +859,8 @@ p {
   opacity: 1;
   transform: translateY(0);
   visibility: visible;
-  transition-delay: 0s;
+  transition-duration: var(--button-morph-fade-in), var(--button-morph-duration), 0s;
+  transition-delay: var(--button-morph-fade-in-delay), 0s, 0s;
 }
 .collapsed .sidebar-update .download-button-cancel-label {
   display: none;
@@ -1961,7 +1974,7 @@ p {
 .user-bubble {
   background: var(--soft);
   border: 1px solid var(--border);
-  padding: 13px 18px;
+  padding: 8px 12px;
   border-radius: 30px 30px 9px 30px;
   font-size: var(--type-body);
   line-height: 1.9;
@@ -2058,28 +2071,6 @@ p {
 .composer-tools .button-icon[aria-haspopup='menu'] {
   border-radius: var(--radius-composer-tool);
 }
-.resume-chip {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  background: var(--soft);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-control);
-  margin-bottom: 10px;
-  padding: 4px 10px;
-  font-size: var(--type-secondary);
-}
-.resume-chip > span {
-  max-width: 240px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.resume-chip small {
-  color: var(--muted);
-  font-size: var(--type-secondary);
-  flex: 1;
-}
 .personal-panel {
   position: relative;
   width: var(--personal-panel-width, 380px);
@@ -2115,14 +2106,16 @@ p {
   .preparation-layout:has(.personal-panel[data-open='true']) .welcome h1 {
     font-size: var(--type-title);
   }
+  /* The column narrows over the panel motion. Follow it instead of switching on the first frame. */
+  .chat-thread,
+  .composer-area {
+    transition: width var(--panel-motion-duration) var(--panel-motion-easing);
+  }
   .preparation-layout:has(.personal-panel[data-open='true']) .chat-thread {
     width: calc(100% - 36px);
   }
   .preparation-layout:has(.personal-panel[data-open='true']) .composer-area {
     width: calc(100% - 20px);
-  }
-  .preparation-layout:has(.personal-panel[data-open='true']) .resume-chip small {
-    display: none;
   }
 }
 .floating-viewport {
@@ -2178,7 +2171,7 @@ p {
 .floating-collapse-chevron {
   display: inline-flex;
   transform: rotate(180deg);
-  transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+  transition: transform 220ms var(--panel-motion-emphasized-easing);
 }
 .is-collapsed .floating-collapse-chevron,
 [data-panel-motion='collapse'] .floating-collapse-chevron {
@@ -2318,7 +2311,7 @@ p {
 }
 .floating-panel .transcript-item p {
   margin-left: 0;
-  padding: 10px 12px;
+  padding: 8px 12px;
   border-radius: var(--radius-interview-answer);
   background: var(--surface);
   overflow-wrap: anywhere;
@@ -2482,7 +2475,7 @@ p {
   gap: 0;
   overflow: hidden;
   flex-shrink: 0;
-  transition: width 180ms ease;
+  transition: width var(--button-morph-duration) var(--button-morph-easing);
   border-radius: 999px;
   corner-shape: round;
 }
@@ -2519,9 +2512,9 @@ p {
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
   transition:
-    width 180ms ease,
-    margin 180ms ease,
-    opacity 180ms ease;
+    width var(--button-morph-duration) var(--button-morph-easing),
+    margin var(--button-morph-duration) var(--button-morph-easing),
+    opacity var(--button-morph-duration) var(--button-morph-easing);
 }
 .floating-screenshot-button[data-shortcut-platform='macos'] .floating-screenshot-shortcut,
 .shortcut-settings[data-shortcut-platform='macos'] kbd,
@@ -2593,9 +2586,6 @@ p {
 }
 .floating-question > .interview-images:first-child {
   margin-top: 0;
-}
-.floating-question.has-images {
-  padding: 8px 10px;
 }
 .floating-question.has-images > .floating-screenshot-label {
   line-height: 1.3;
@@ -3810,7 +3800,7 @@ article.account-quota > .interview-reveal :is(.account-quota-state, p) {
   corner-shape: round;
   background: #fff;
   box-shadow: 0 1px 3px rgb(0 0 0 / 16%);
-  transition: transform 0.18s;
+  transition: transform var(--panel-motion-duration) var(--panel-motion-easing);
 }
 .settings-switch[aria-checked='true'] > span {
   transform: translateX(16px);
@@ -4656,7 +4646,7 @@ summary::marker {
   display: inline-flex;
   vertical-align: middle;
   margin-left: 6px;
-  transition: transform 150ms ease;
+  transition: transform var(--panel-motion-duration) var(--panel-motion-easing);
 }
 details[open] > summary > .disclosure-chevron {
   transform: rotate(90deg);
@@ -4819,13 +4809,14 @@ details[open] > summary > .disclosure-chevron {
   /* The first recorded status replaces the waiting label in the same row. */
   margin-block: 8px;
 }
-.response-steps li {
+/* Direct steps only: Markdown lists inside reasoning keep their normal layout. */
+.response-steps > li {
   display: grid;
   grid-template-columns: 16px minmax(0, 1fr);
   gap: 8px;
   overflow-wrap: anywhere;
 }
-.response-steps li > svg {
+.response-steps > li > svg {
   margin-top: 4px;
 }
 .response-steps .markdown-content {
@@ -5293,7 +5284,7 @@ details[open] > summary > .disclosure-chevron {
   width: fit-content;
   max-width: 90%;
   margin: 0 0 18px auto;
-  padding: 10px 14px;
+  padding: 8px 12px;
   border-radius: var(--radius-interview-answer);
   background: var(--selected);
   font-size: var(--type-body);
@@ -5303,7 +5294,7 @@ details[open] > summary > .disclosure-chevron {
   user-select: text;
 }
 .answer-bubble {
-  padding: 14px 16px;
+  padding: 8px 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius-interview-answer);
   background: color-mix(in srgb, var(--surface) 70%, transparent);
@@ -5631,14 +5622,15 @@ details[open] > summary > .disclosure-chevron {
   transition:
     width var(--panel-motion-duration) var(--panel-motion-easing),
     margin-right var(--panel-motion-duration) var(--panel-motion-easing),
-    opacity 180ms ease-out,
+    border-width var(--panel-motion-duration) var(--panel-motion-easing),
+    opacity var(--panel-motion-exit-duration) var(--panel-motion-easing),
     visibility 0s;
 }
 .record-answer-panel[data-open='false'] {
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
-  transition-delay: 0s, 0s, 0s, var(--panel-motion-duration);
+  transition-delay: 0s, 0s, 0s, 0s, var(--panel-motion-duration);
 }
 .record-answer-panel > header {
   padding: 24px 22px 20px;
@@ -5935,8 +5927,7 @@ details[open] > summary > .disclosure-chevron {
   font-size: var(--type-body);
   line-height: 1.8;
 }
-.simulation-disclaimer,
-.resume-chip small {
+.simulation-disclaimer {
   font-size: var(--type-secondary);
   line-height: 1.6;
 }
@@ -6798,9 +6789,9 @@ details[open] > summary > .disclosure-chevron {
   opacity: 0;
   overflow: clip;
   transition:
-    block-size 220ms ease-out,
-    opacity 180ms ease-out,
-    content-visibility 220ms allow-discrete;
+    block-size var(--panel-motion-duration) var(--panel-motion-easing),
+    opacity var(--panel-motion-duration) var(--panel-motion-easing),
+    content-visibility var(--panel-motion-duration) allow-discrete;
 }
 .profile-disclosure[open]::details-content,
 .profile-entry[open]::details-content {
@@ -7256,9 +7247,6 @@ h4,
 .interview-font-preview .floating-question {
   margin-bottom: 14px;
 }
-.interview-font-preview .answer-bubble {
-  padding: 12px;
-}
 .interview-font-preview .floating-composer {
   padding: 10px var(--floating-composer-edge-gap) var(--floating-composer-edge-gap);
 }
@@ -7358,11 +7346,6 @@ h4,
   font-size: 10px;
   gap: 6px;
 }
-.login-interview-preview .transcript-item > p,
-.login-interview-preview .floating-question,
-.login-interview-preview .answer-bubble {
-  padding: 8px 10px;
-}
 .login-interview-preview .provider-identity {
   font-size: 11px;
 }
@@ -7432,10 +7415,13 @@ small {
     opacity var(--button-morph-duration) var(--button-morph-easing),
     transform var(--button-morph-duration) var(--button-morph-easing);
 }
+/* The leaving label clears before the arriving one fades in, so both never overlap at half strength. */
 .confirm-delete-idle,
 .button-morph-idle {
   opacity: 1;
   transform: translateY(0);
+  transition-duration: var(--button-morph-fade-in), var(--button-morph-duration);
+  transition-delay: var(--button-morph-fade-in-delay), 0s;
 }
 .confirm-delete-confirm {
   position: absolute;
@@ -7444,23 +7430,31 @@ small {
   top: 50%;
   opacity: 0;
   transform: translate(-50%, calc(-50% + var(--button-morph-shift)));
+  transition-duration: var(--button-morph-fade-out), var(--button-morph-duration);
 }
 .button-morph-expanded {
   opacity: 0;
   transform: translateY(var(--button-morph-shift));
+  transition-duration: var(--button-morph-fade-out), var(--button-morph-duration);
 }
 .confirm-delete.is-confirming .confirm-delete-idle,
 .floating-confirm-action.is-confirming .button-morph-idle {
   opacity: 0;
   transform: translateY(calc(-1 * var(--button-morph-shift)));
+  transition-duration: var(--button-morph-fade-out), var(--button-morph-duration);
+  transition-delay: 0s;
 }
 .confirm-delete.is-confirming .confirm-delete-confirm {
   opacity: 1;
   transform: translate(-50%, -50%);
+  transition-duration: var(--button-morph-fade-in), var(--button-morph-duration);
+  transition-delay: var(--button-morph-fade-in-delay), 0s;
 }
 .floating-confirm-action.is-confirming .button-morph-expanded {
   opacity: 1;
   transform: translateY(0);
+  transition-duration: var(--button-morph-fade-in), var(--button-morph-duration);
+  transition-delay: var(--button-morph-fade-in-delay), 0s;
 }
 .confirm-delete-error {
   position: absolute;
@@ -7594,10 +7588,13 @@ small {
 .download-button:not(.is-icon-only) .download-button-progress {
   opacity: 1;
   transform: translateY(0);
+  transition-duration: var(--button-morph-fade-in), var(--button-morph-duration), 0s;
+  transition-delay: var(--button-morph-fade-in-delay), 0s, var(--button-morph-duration);
 }
 .download-button:not(.is-icon-only) .download-button-cancel {
   opacity: 0;
   transform: translateY(var(--button-morph-shift));
+  transition-duration: var(--button-morph-fade-out), var(--button-morph-duration), 0s;
 }
 .download-button:not(.is-icon-only).is-cancellable:is(:hover, :focus-visible) {
   width: var(--download-cancel-width, 88px);
@@ -7606,13 +7603,15 @@ small {
   .download-button-progress {
   opacity: 0;
   transform: translateY(calc(-1 * var(--button-morph-shift)));
+  transition-duration: var(--button-morph-fade-out), var(--button-morph-duration), 0s;
   transition-delay: 0s, 0s, var(--button-morph-duration);
 }
 .download-button:not(.is-icon-only).is-cancellable:is(:hover, :focus-visible)
   .download-button-cancel {
   opacity: 1;
   transform: translateY(0);
-  transition-delay: 0s;
+  transition-duration: var(--button-morph-fade-in), var(--button-morph-duration), 0s;
+  transition-delay: var(--button-morph-fade-in-delay), 0s, 0s;
 }
 @media (prefers-reduced-motion: reduce) {
   .download-button:not(.is-icon-only),
@@ -7812,6 +7811,9 @@ small {
    remaining cards again after their first transition has already settled. */
 .chat-settings-notices > .component-notice-reveal[data-open='false'] {
   margin-bottom: calc(0px - var(--notice-gap));
+  transition-duration: var(--panel-motion-duration),
+    calc(var(--panel-motion-duration) * var(--fade-out-share)), var(--panel-motion-duration);
+  transition-timing-function: var(--panel-motion-easing);
 }
 @starting-style {
   .chat-settings-notices > .component-notice-reveal[data-open='true'] {
@@ -8371,13 +8373,14 @@ svg[data-ui-icon] {
   transition:
     width var(--panel-motion-duration) var(--panel-motion-easing),
     margin-right var(--panel-motion-duration) var(--panel-motion-easing),
-    opacity 180ms ease-out,
+    border-width var(--panel-motion-duration) var(--panel-motion-easing),
+    opacity var(--panel-motion-exit-duration) var(--panel-motion-easing),
     visibility 0s;
 }
 .personal-panel[data-open='false'] {
   margin-right: 0;
   border-width: 0;
-  transition-delay: 0s, 0s, 0s, var(--panel-motion-duration);
+  transition-delay: 0s, 0s, 0s, 0s, var(--panel-motion-duration);
 }
 .preparation-workspace .personal-panel {
   margin-top: 64px;

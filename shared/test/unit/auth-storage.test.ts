@@ -221,7 +221,7 @@ it('fresh and explicitly disconnected installs skip startup; only explicit succe
   expect(await createServiceSelection().session('startup', verify)).toEqual(sessionFor('chatgpt'));
 });
 
-it.each(['anthropic', 'gemini', 'kimi', 'glm', 'doubao', 'qwen'])(
+it.each(['anthropic', 'glm', 'doubao', 'qwen'])(
   'starts disconnected for a saved %s selection until a supported login succeeds',
   async (service) => {
     const previous = { version: 2, service, connected: true };
@@ -240,6 +240,15 @@ it.each(['anthropic', 'gemini', 'kimi', 'glm', 'doubao', 'qwen'])(
     expect(verify).toHaveBeenCalledExactlyOnceWith('copilot');
   },
 );
+
+it('restores a saved Gemini connection through its provider verifier', async () => {
+  await selectionFile({ version: 2, service: 'gemini', connected: true });
+  const state = createServiceSelection();
+  const session = { mode: 'gemini' as const, user: { id: 'gemini', name: 'Gemini API', email: '' }, expiresAt: null };
+  const verify = vi.fn(async () => session);
+  await expect(state.session('startup', verify)).resolves.toEqual(session);
+  expect(verify).toHaveBeenCalledExactlyOnceWith('gemini');
+});
 
 it('temporary failure preserves the prior selection, a successful switch ignores late verification', async () => {
   const file = await selectionFile('copilot');

@@ -7,7 +7,7 @@ import {
 } from '../contracts/apiConnections';
 import type { ProfileApiConnections } from '../application/apiConnections';
 import { publicFailure } from '../backend/chat/errors';
-import { handleDesktop, sendDesktop } from './handle';
+import { handleDesktop, isMainDocumentNavigation, sendDesktop } from './handle';
 
 const consoles: Record<ApiProvider, { keys: string; billing: string }> = {
   openai: {
@@ -17,6 +17,14 @@ const consoles: Record<ApiProvider, { keys: string; billing: string }> = {
   deepseek: {
     keys: 'https://platform.deepseek.com/api_keys',
     billing: 'https://platform.deepseek.com/usage',
+  },
+  kimi: {
+    keys: 'https://platform.kimi.com/console/api-keys',
+    billing: 'https://platform.kimi.com/console/fee-detail',
+  },
+  gemini: {
+    keys: 'https://aistudio.google.com/apikey',
+    billing: 'https://aistudio.google.com/billing',
   },
 };
 function fieldBounds(value: unknown): ApiKeyField {
@@ -100,12 +108,16 @@ export function registerApiConnectionIpc(ports: {
     const controller = new AbortController();
     active = { id, sender: event.sender, api, controller };
     const cancel = () => controller.abort();
+    const navigation = (details: Electron.WebContentsDidStartNavigationEventParams) => {
+      if (isMainDocumentNavigation(details)) cancel();
+    };
     const tab = (backwards: boolean) => {
       if (!controller.signal.aborted && active?.controller === controller)
         sendDesktop(event.sender, 'api-keys:tab', id, backwards);
     };
     event.sender.once('destroyed', cancel);
-    event.sender.once('did-start-loading', cancel);
+    event.sender.once('render-process-gone', cancel);
+    event.sender.on('did-start-navigation', navigation);
     try {
       return await api.configure(
         config,
@@ -119,7 +131,8 @@ export function registerApiConnectionIpc(ports: {
     } finally {
       if (active?.controller === controller) active = undefined;
       event.sender.off('destroyed', cancel);
-      event.sender.off('did-start-loading', cancel);
+      event.sender.off('render-process-gone', cancel);
+      event.sender.off('did-start-navigation', navigation);
     }
   });
   handleDesktop('api-keys:control', (event, token, value, ...extra) => {

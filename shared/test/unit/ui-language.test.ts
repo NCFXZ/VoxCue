@@ -36,6 +36,22 @@ describe('interface language', () => {
     expect(translateUI('多语言语音识别 · CUDA · 对齐 CPU · 本地', 'en'))
       .toBe('Multilingual speech recognition · CUDA · CPU alignment · Local');
   });
+  it.each([
+    ['每分钟请求次数', ' 次', '请约 1 分钟后重试', 'requests-per-minute'],
+    ['每分钟 token', ' token', '请约 1 分钟后重试', 'tokens-per-minute'],
+    ['每日 token', ' token', '请明天再试', 'daily token'],
+    ['同时请求数', ' 个', '请等待其他回答结束后重试', 'concurrent-request'],
+  ])('translates Kimi %s limits with and without the returned limit number', (kind, unit, retry, label) => {
+    for (const limit of ['', `（123${unit}）`]) {
+      const message = `已达到 Kimi 账户的${kind}上限${limit}，${retry}。限额随累计充值等级提高。`;
+      const english = translateUI(message, 'en');
+      expect(english).toContain('Kimi');
+      expect(english).toContain(label);
+      expect(english).not.toMatch(/\p{Script=Han}/u);
+      if (limit) expect(english).toContain('123');
+      expect(translateUI(message, 'zh-CN')).toBe(message);
+    }
+  });
   it('provides translations for literal UI keys used by renderers and native dialogs', () => {
     const files: string[] = [];
     const visitDirectory = (directory: string) => {

@@ -1,0 +1,24 @@
+.google-search-suggestions {
+  min-width: 0;
+  margin: 0;
+}
+
+.chat-message:has(> .chat-source-group > .google-search-suggestions) > .response-progress {
+  margin-bottom: 8px;
+}
+
+.chat-source-group:has(> .google-search-suggestions) + .chat-answer {
+  margin-top: 8px;
+}
+
+.google-search-suggestions + .chat-sources {
+  margin-top: 6px;
+}
+
+.google-search-suggestions iframe {
+  display: block;
+  width: 100%;
+  height: 80px;
+  border: 0;
+  color-scheme: inherit;
+}

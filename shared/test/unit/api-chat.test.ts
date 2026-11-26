@@ -83,7 +83,7 @@ describe('API key providers', () => {
     expect(reply.usage).toEqual({ inputTokens: 48, outputTokens: 24, totalTokens: 72 });
     expect(usage.add).toHaveBeenCalledOnce();
   });
-  it.each(['openai', 'deepseek'] as const)('keeps an in-flight %s answer running when another model is rejected', async provider => {
+  it.each(apiProviderIds)('keeps an in-flight %s answer running when another model is rejected', async provider => {
     const { transport } = createRequire(import.meta.url)('../fixtures/api-interactive-preview.cjs');
     const vendor = transport(provider, credential.key);
     let start!: () => void, resume!: () => void;
@@ -112,6 +112,111 @@ describe('API key providers', () => {
       await expect(active).resolves.toMatchObject({ provider: { id: provider } });
     }
   });
+  it('keeps Kimi model discovery, preparation search and interview replies on the Moonshot endpoint', async () => {
+    const source = { title: 'Synthetic documentation', url: 'https://example.org/guide' };
+    const model = 'kimi-k3.1-pro';
+    const history = [{ role: 'user', content: '第一轮' }, { role: 'assistant', content: '上一轮回答' },
+      { role: 'user', content: '继续' }] as ChatRequest['turns'];
+    const http = vi.fn<typeof fetch>(async (url, init) => {
+      expect(new Headers(init?.headers).get('authorization')).toBe('Bearer synthetic-api-key');
+      expect(init?.redirect).toBe('error');
+      if (String(url) === 'https://api.moonshot.cn/v1/models')
+        return Response.json({ data: [{ id: 'kimi-k2.6' }, { id: model, supports_image_in: false },
+          { id: model }, { id: 'kimi-k3.1-pro-highspeed' }, { id: 'kimi-k3', supports_reasoning: false }] });
+      expect(String(url)).toBe('https://api.moonshot.cn/v1/responses');
+      const body = JSON.parse(String(init?.body));
+      expect(body).toMatchObject({ model, stream: true, input: history });
+      expect(body).not.toHaveProperty('reasoning');
+      const search = !!body.tools;
+      if (search) {
+        expect(body.tools).toEqual([{ type: 'web_search' }]);
+        expect(body.include).toContain('web_search_call.action.sources');
+        expect(body.text.format).toMatchObject({ type: 'json_schema', strict: true });
+        expect(body.instructions).toContain('搜索词和网址不得包含个人资料');
+      }
+      const answer = search ? JSON.stringify({ answer: '准备回答', changes: {}, skillScope: null }) : '面试回答';
+      return sse([{ type: 'response.completed', response: { status: 'completed', output: [
+        ...(search ? [{ type: 'web_search_call', status: 'completed', action: { type: 'search', sources: [source] } }] : []),
+        { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: answer }] },
+      ] } }]);
+    });
+    const { service } = fixture('kimi', http);
+    const signal = new AbortController().signal;
+    const models = await service.models();
+    expect(models.map(entry => entry.id)).toEqual([model, 'kimi-k3.1-pro-highspeed', 'kimi-k3']);
+    expect(models[0].reasoningEfforts).toEqual(['low', 'high', 'max']);
+    expect(models[2].reasoningEfforts).toEqual([]);
+    const input = { ...request(model), turns: history };
+    await expect(service.stream({ ...input, webSearch: true, profile: { name: '', background: '', jobDescription: '' } }, vi.fn(), signal))
+      .resolves.toMatchObject({ answerText: '准备回答', sources: [source], provider: { id: 'kimi', dataRecipient: 'Moonshot AI' } });
+    await expect(service.stream(input, vi.fn(), signal)).resolves.toMatchObject({ answerText: '面试回答', sources: [] });
+    for (const [name, message] of [['image.png', '不支持图片输入'], ['notes.pdf', '将文档转换成纯文本']]) {
+      await expect(service.stream({ ...input, turns: [{ role: 'user', content: '附件', files: [
+        { name, bytes: Uint8Array.of(1) },
+      ] }] }, vi.fn(), signal)).rejects.toThrow(message);
+    }
+    expect(http).toHaveBeenCalledTimes(3);
+  });
+
+  it('reads Kimi credit from the domestic balance endpoint and rejects an invalid balance', async () => {
+    const http = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ code: 0, data: { available_balance: 3.5, voucher_balance: 4, cash_balance: -0.5 } }))
+      .mockResolvedValueOnce(Response.json({ code: 0, data: {} }));
+    const signal = new AbortController().signal;
+    await expect(readApiBalance('kimi', credential, signal, http)).resolves.toEqual([
+      { currency: 'CNY', total: '3.5', granted: '4', toppedUp: '-0.5' },
+    ]);
+    await expect(readApiBalance('kimi', credential, signal, http)).rejects.toThrow('余额格式无效');
+    for (const [url, init] of http.mock.calls) {
+      expect(String(url)).toBe('https://api.moonshot.cn/v1/users/me/balance');
+      expect(new Headers(init?.headers).get('authorization')).toBe('Bearer synthetic-api-key');
+    }
+  });
+
+  it.each([
+    ['exceeded_current_quota_error', '余额不足'],
+    ['engine_overloaded_error', '模型繁忙'],
+    ['rate_limit_reached_error', '调用限额'],
+  ])('reports the billing or capacity reason for a Kimi 429 (%s)', async (type, expected) => {
+    const http = vi.fn<typeof fetch>().mockResolvedValue(Response.json({
+      error: { type, message: 'upstream text containing the synthetic key' },
+    }, { status: 429 }));
+    const { service } = fixture('kimi', http);
+    await expect(service.models()).rejects.toThrow(expected);
+  });
+  it('regenerates an invalid Kimi proposal visibly instead of inside the short buffered window', async () => {
+    const reply = (text: string) => sse([
+      { type: 'response.output_text.delta', output_index: 0, content_index: 0, delta: text },
+      { type: 'response.completed', response: { status: 'completed', output: [
+        { type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] },
+      ] } },
+    ]);
+    const http = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ data: [{ id: 'kimi-k3' }] }))
+      .mockResolvedValueOnce(reply('先说明一下：{"answer":"草稿"}'))
+      .mockResolvedValueOnce(reply(JSON.stringify({ answer: '已重新整理。', changes: {}, skillScope: null })));
+    const { service } = fixture('kimi', http);
+    const emit = vi.fn();
+    await expect(service.stream({ ...request('kimi-k3'), profile: { name: '', background: '', jobDescription: '' } },
+      emit, new AbortController().signal)).resolves.toMatchObject({ answerText: '已重新整理。' });
+    expect(emit).toHaveBeenCalledWith({ id: 'test-request', type: 'profile-preview', preview: {} });
+    expect(emit).toHaveBeenCalledWith(expect.objectContaining({ type: 'delta', replace: true, text: '已重新整理。' }));
+  });
+  it.each([
+    [{ type: 'error', error: { type: 'rate_limit_exceeded', code: 'rate_limit_exceeded',
+      message: 'Your account org-synthetic <ak-synthetic> request reached organization (kimi-k3) RPM rate limit, limit: 3' } },
+    '已达到 Kimi 账户的每分钟请求次数上限（3 次），请约 1 分钟后重试'],
+    [{ type: 'error', code: 'rate_limit_reached_error', message: 'synthetic' }, '调用限额'],
+  ])('keeps the Kimi reason when a 200 stream ends with an error event', async (event, expected) => {
+    const http = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ data: [{ id: 'kimi-k3' }] }))
+      .mockResolvedValueOnce(sse([{ type: 'response.created' }, event]));
+    const { service } = fixture('kimi', http);
+    const failure = service.stream(request('kimi-k3'), vi.fn(), new AbortController().signal);
+    await expect(failure).rejects.toThrow(expected);
+    await expect(failure).rejects.not.toThrow('synthetic');
+  });
+
   it('reports only the DeepSeek default advertised for thinking and leaves automatic requests unset', async () => {
     let entries = [undefined, 'none', 'unknown', 'high'].map((default_level, index) => ({
       ...deepModel, id: 'model-' + index, effort: { supported_levels: ['none', 'high'], default_level },

@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef } from 'react';
+import { continuedTiming, runningMotion } from './motion-continuation';
 
-type Track = { height: number; animation?: Animation; release?(): void };
+type Track = { height: number; from?: number; animation?: Animation; release?(): void };
 
 // Animate changes in the targets' natural heights using the shared panel timing.
 export function useHeightTransition(
@@ -31,10 +32,12 @@ export function useHeightTransition(
     const sizes = Array.from(nodes, (node) => {
       const old = tracks.current.get(node);
       const from = old?.animation ? node.getBoundingClientRect().height : old?.height;
+      // Read the carried speed before cancelling, so a retarget keeps moving.
+      const running = old?.from === undefined ? undefined : runningMotion(old.animation, [old.height - old.from]);
       if (old) cancel(old);
-      return { node, from, height: node.getBoundingClientRect().height };
+      return { node, from, running, height: node.getBoundingClientRect().height };
     });
-    for (const { node, from, height } of sizes) {
+    for (const { node, from, running, height } of sizes) {
       const track: Track = { height };
       tracks.current.set(node, track);
       if (
@@ -66,18 +69,19 @@ export function useHeightTransition(
       }
       const style = getComputedStyle(node);
       const duration = style.getPropertyValue('--panel-motion-duration').trim();
+      const timing = continuedTiming({
+        duration: Number.parseFloat(duration) * (duration.endsWith('ms') ? 1 : 1000) || 240,
+        easing:
+          style.getPropertyValue('--panel-motion-easing').trim() || 'cubic-bezier(0.2, 0, 0, 1)',
+      }, running, [height - from]);
       const animation = node.animate(
         [
           { height: `${from}px`, minHeight: 0, overflow: 'clip' },
           { height: `${height}px`, minHeight: 0, overflow: 'clip' },
         ],
-        {
-          duration: Number.parseFloat(duration) * (duration.endsWith('ms') ? 1 : 1000) || 240,
-          easing:
-            style.getPropertyValue('--panel-motion-easing').trim() || 'cubic-bezier(0.2, 0, 0, 1)',
-          fill: 'both',
-        },
+        { ...timing, fill: 'both' },
       );
+      track.from = from;
       track.animation = animation;
       const finish = () => {
         track.release?.();

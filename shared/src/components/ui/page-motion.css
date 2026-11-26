@@ -40,13 +40,36 @@
   animation-timing-function: var(--panel-motion-easing);
   animation-fill-mode: both;
 }
+/* The later fade owns opacity: the old page clears before the new one appears,
+   so the two snapshots never overlap at half strength while they slide. */
 ::view-transition-old(screen),
 ::view-transition-old(panel-outgoing) {
-  animation-name: screen-exit;
+  animation-name: screen-exit, view-fade-out;
+  animation-duration: var(--panel-motion-duration, 240ms),
+    calc(var(--panel-motion-duration, 240ms) * var(--fade-out-share, 0.4));
 }
 ::view-transition-new(screen),
 ::view-transition-new(panel-incoming) {
-  animation-name: screen-enter;
+  animation-name: screen-enter, view-fade-in;
+  animation-duration: var(--panel-motion-duration, 240ms),
+    calc(var(--panel-motion-duration, 240ms) * (1 - var(--fade-in-delay-share, 0.15)));
+  animation-delay: 0s, calc(var(--panel-motion-duration, 240ms) * var(--fade-in-delay-share, 0.15));
+}
+@keyframes view-fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+@keyframes view-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 @keyframes screen-exit {
   from {

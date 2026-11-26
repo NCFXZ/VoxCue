@@ -39,6 +39,7 @@ export function ApiKeyDialog({
     const dialog = node.closest('dialog')!;
     const requestId = crypto.randomUUID();
     let disposed = false;
+    let entered = false;
     let frame = 0;
     let last: ApiKeyField | undefined;
     cancelRequested.current = false;
@@ -95,7 +96,7 @@ export function ApiKeyDialog({
       }
     }
     function schedule() {
-      if (!frame) frame = requestAnimationFrame(layout);
+      if (entered && !disposed && !frame) frame = requestAnimationFrame(layout);
     }
     const resize = new ResizeObserver(schedule);
     resize.observe(node);
@@ -111,8 +112,14 @@ export function ApiKeyDialog({
         : revealButton.current;
       next?.focus({ preventScroll: true });
     });
-    // Wait for the native dialog layout. A discarded StrictMode mount never opens an input.
-    schedule();
+    // The native editor is outside Chromium's opacity layer. Let the empty field
+    // fade in with the dialog before placing the editor over its final surface.
+    const fades = dialog.getAnimations().filter(animation =>
+      animation instanceof CSSAnimation && animation.animationName === 'modal-fade-in');
+    void Promise.allSettled(fades.map(animation => animation.finished)).then(() => {
+      entered = true;
+      schedule();
+    });
     return () => {
       disposed = true;
       cancelAnimationFrame(frame);

@@ -236,8 +236,11 @@ export function boundaryViolations(graph) {
       if (file === 'src/components/ui/content-reveal.tsx' &&
           !['react', 'src/components/ui/useHeightTransition.ts', 'src/components/ui/content-reveal.css'].includes(target))
         fail('桌面和手机共用的展开动效仅依赖 React、尺寸过渡和自身样式');
-      if (file === 'src/components/ui/useHeightTransition.ts' && target !== 'react')
-        fail('共用尺寸过渡只依赖 React 和浏览器原生动画接口');
+      if (file === 'src/components/ui/useHeightTransition.ts' &&
+          !['react', 'src/components/ui/motion-continuation.ts'].includes(target))
+        fail('共用尺寸过渡只依赖 React、续播计时和浏览器原生动画接口');
+      if (file === 'src/components/ui/motion-continuation.ts')
+        fail('共用续播计时只使用浏览器原生动画接口');
       if (file === 'src/lib/useStreamingMarkdown.ts' && target !== 'react')
         fail('桌面和手机共用的 Markdown 刷新工具只依赖 React');
       if (file === 'src/lib/messageMotion.ts')

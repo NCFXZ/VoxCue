@@ -27,6 +27,8 @@ export interface ChatMessage {
   startedAt?: number;
   durationMs?: number;
   sources?: ChatSource[];
+  googleSearchSuggestions?: string;
+  googleSearchGroundedAt?: number;
   usage?: TokenUsage | null;
   status?: 'streaming' | 'completed' | 'stopped' | 'failed';
   error?: string;

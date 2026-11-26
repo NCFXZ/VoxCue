@@ -10,6 +10,7 @@ import { assertInitialDownloadProgress, assertDownloadButton, pointAtControl } f
 import { assertLoadingIcon } from './assert-loading-icon.mjs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import assert from 'node:assert/strict';
 
 const profile = path.join(testRoot, 'profile');
@@ -138,6 +139,18 @@ const morph = async (button, idleSelector, expandedSelector, trigger, expanded) 
       globalThis.updateMorphFrames = new Promise((resolve) => {
         const frames = [];
         const start = performance.now();
+        const events = [];
+        globalThis.updateMorphPointerEvents = events;
+        const eventTypes = ['pointermove', 'pointerover', 'pointerout', 'blur', 'focus'];
+        const record = (event) => {
+          events.push({ type: event.type, at: performance.now() - start,
+            x: event.clientX, y: event.clientY, trusted: event.isTrusted,
+            hitOwned: typeof event.clientX === 'number'
+              ? element.contains(document.elementFromPoint(event.clientX, event.clientY)) : undefined,
+            hovered: element.matches(':hover'), focused: document.hasFocus() });
+          if (events.length > 40) events.shift();
+        };
+        for (const type of eventTypes) window.addEventListener(type, record, true);
         let triggered;
         globalThis.updateMorphTriggered = () => {
           triggered = performance.now();
@@ -156,6 +169,8 @@ const morph = async (button, idleSelector, expandedSelector, trigger, expanded) 
             expanded: Number(getComputedStyle(element.querySelector(selectors[1])).opacity),
             hovered: element.matches(':hover'),
             focused: document.hasFocus(),
+            focusVisible: element.matches(':focus-visible'),
+            active: document.activeElement === element,
             x: element.getBoundingClientRect().x,
             y: element.getBoundingClientRect().y,
           });
@@ -172,7 +187,10 @@ const morph = async (button, idleSelector, expandedSelector, trigger, expanded) 
                 ))
           )
             requestAnimationFrame(sample);
-          else resolve(frames);
+          else {
+            for (const type of eventTypes) window.removeEventListener(type, record, true);
+            resolve(frames);
+          }
         };
         sample();
       });
@@ -182,6 +200,28 @@ const morph = async (button, idleSelector, expandedSelector, trigger, expanded) 
   await trigger();
   await button.page().evaluate(() => globalThis.updateMorphTriggered());
   const frames = await button.page().evaluate(() => globalThis.updateMorphFrames);
+  const reportInput = async () => {
+    let native;
+    if (process.platform === 'win32') {
+      const { probe } = await import(pathToFileURL(path.join(workspace.platformRoot, 'test/scripts/window-probe.mjs')).href);
+      const owner = await app.browserWindow(button.page());
+      try {
+        const target = await owner.evaluate(window => ({
+          handle: window.getNativeWindowHandle().readBigUInt64LE().toString(), pid: process.pid,
+        }));
+        native = { target, foreground: probe('foreground'), cursor: probe('cursor-activity'),
+          geometry: probe('geometry', target.handle, target.pid) };
+      } finally { await owner.dispose(); }
+    }
+    console.error(JSON.stringify({ morphInput: expanded,
+      scale: process.env.VOXCUE_TEST_SCALE_FACTOR ?? '1', native,
+      renderer: await button.evaluate(element => ({
+        viewport: [innerWidth, innerHeight], dpr: devicePixelRatio,
+        rect: element.getBoundingClientRect().toJSON(), hovered: element.matches(':hover'),
+        focused: document.hasFocus(), active: document.activeElement === element,
+        focusVisible: element.matches(':focus-visible'), events: globalThis.updateMorphPointerEvents,
+      })) }));
+  };
   if (process.argv.includes('--diagnostics'))
     console.log(
       JSON.stringify({
@@ -196,26 +236,31 @@ const morph = async (button, idleSelector, expandedSelector, trigger, expanded) 
         settled: frames.at(-1),
       }),
     );
-  verifyRoundCapFrames(frames);
-  assert.ok(frames.every((frame) => frame.radius === '999px'));
-  assert.ok(frames.every((frame) => frame.border === 'rgba(0, 0, 0, 0)'));
-  assert.ok(
-    frames.some(
-      (frame) => frame.idle > 0 && frame.idle < 1 && frame.expanded > 0 && frame.expanded < 1,
-    ),
-    'Icon and full label crossfade together: ' +
-      JSON.stringify({
-        expanded,
-        frames: frames.map(({ width, idle, expanded }) => ({ width, idle, expanded })),
-      }),
-  );
-  const settled =
-    'Update morph must settle in its requested state: ' + JSON.stringify({ expanded, frames });
-  assert.equal(frames.at(-1).idle, expanded ? 0 : 1, settled);
-  assert.equal(frames.at(-1).expanded, expanded ? 1 : 0, settled);
-  assert.ok(
-    expanded ? frames.at(-1).width > frames[0].width : frames.at(-1).width < frames[0].width,
-  );
+  try {
+    verifyRoundCapFrames(frames);
+    assert.ok(frames.every((frame) => frame.radius === '999px'));
+    assert.ok(frames.every((frame) => frame.border === 'rgba(0, 0, 0, 0)'));
+    assert.ok(
+      frames.some(
+        (frame) => frame.idle > 0 && frame.idle < 1 && frame.expanded > 0 && frame.expanded < 1,
+      ),
+      'Icon and full label crossfade together: ' +
+        JSON.stringify({
+          expanded,
+          frames: frames.map(({ width, idle, expanded }) => ({ width, idle, expanded })),
+        }),
+    );
+    const settled =
+      'Update morph must settle in its requested state: ' + JSON.stringify({ expanded, frames });
+    assert.equal(frames.at(-1).idle, expanded ? 0 : 1, settled);
+    assert.equal(frames.at(-1).expanded, expanded ? 1 : 0, settled);
+    assert.ok(
+      expanded ? frames.at(-1).width > frames[0].width : frames.at(-1).width < frames[0].width,
+    );
+  } catch (error) {
+    await reportInput().catch(diagnostic => console.error('Morph input diagnostic unavailable:', diagnostic.message));
+    throw error;
+  }
 };
 const collapsedAction = async (page, button) => {
   await page.getByRole('button', { name: '收起侧栏', exact: true }).click();

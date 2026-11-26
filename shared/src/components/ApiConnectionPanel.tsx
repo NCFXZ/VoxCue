@@ -9,6 +9,7 @@ import {
 } from '../../electron/contracts/apiConnections';
 import type { AppUsage } from '../../electron/contracts/chat';
 import { t, uiLocale } from '../i18n';
+import { formatApiBalance } from '../services/accountUsageSummary';
 import { apiConnections } from '../services/apiConnections';
 import { userError } from '../services/errors';
 import { useAuth } from '../stores/auth';
@@ -39,8 +40,8 @@ export function ApiUsageValues({ balance, local }: { balance?: string | ApiBalan
                 const rank = (currency: string) => currency === 'CNY' ? 0 : currency === 'USD' ? 1 : 2;
                 return rank(a.currency) - rank(b.currency);
               })
-              .map(({ currency, total }, index) => (
-                <span className="api-balance-value" key={`${currency}-${index}`}>{total} {currency}</span>
+              .map((entry, index) => (
+                <span className="api-balance-value" key={`${entry.currency}-${index}`}>{formatApiBalance(entry)}</span>
               ))}
           </dd>
         </div>

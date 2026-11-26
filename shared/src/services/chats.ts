@@ -36,7 +36,7 @@ export interface ChatSnapshot {
   skillsNeedUpdate?: boolean;
 }
 type StoredAttachment = Omit<ChatAttachment, 'file'>;
-type StoredMessage = Omit<ChatMessage, 'options' | 'profileGeneration'> & {
+type StoredMessage = Omit<ChatMessage, 'options' | 'profileGeneration' | 'googleSearchSuggestions'> & {
   options?: Omit<ChatRequestOptions, 'attachments'> & { attachments: StoredAttachment[] };
 };
 export type StoredSnapshot = Omit<ChatSnapshot, 'conversations' | 'attachments'> & {
@@ -68,7 +68,7 @@ export function storedMessage(value: unknown) {
   if (
     !['reasoningSummary', 'error', 'errorCode'].every((key) => optionalString(value[key])) ||
     !['applied', 'dismissed'].every((key) => optionalBoolean(value[key])) ||
-    !['startedAt', 'durationMs'].every((key) => optionalNumber(value[key])) ||
+    !['startedAt', 'durationMs', 'googleSearchGroundedAt'].every((key) => optionalNumber(value[key])) ||
     (value.status !== undefined &&
       !['streaming', 'completed', 'stopped', 'failed'].includes(value.status)) ||
     (value.mode !== undefined && !['live', 'mock'].includes(value.mode)) ||
@@ -304,12 +304,26 @@ function chatEncoder() {
   const packConversation = (conversation: PreparationConversation, refs?: Set<string>): ConversationRow => ({
     ...conversation,
     attachments: pack(conversation.attachments, refs),
-    messages: conversation.messages.map(({ profileGeneration: _transient, options, ...message }) => ({
+    messages: conversation.messages.filter(message => !expiredGoogleSearchHistory(message))
+      .map(({ profileGeneration: _transient, googleSearchSuggestions: _suggestions, options, ...message }) => ({
       ...message,
+      ...(message.googleSearchGroundedAt !== undefined ? {
+        sources: undefined, activity: undefined, activities: undefined, reasoningSummary: undefined,
+        changes: message.changes?.skills ? {
+          ...message.changes,
+          skills: message.changes.skills.map(skill => ({ ...skill, sources: [] })),
+        } : message.changes,
+        skillSourceIssues: message.skillSourceIssues?.map(issue => ({ ...issue, sources: [] })),
+      } : {}),
       ...(options ? { options: { ...options, attachments: pack(options.attachments, refs) } } : {}),
     })),
   });
   return { files, pack, packConversation };
+}
+
+function expiredGoogleSearchHistory(message: Pick<ChatMessage, 'googleSearchGroundedAt'>) {
+  return message.googleSearchGroundedAt !== undefined &&
+    message.googleSearchGroundedAt < Date.now() - 730 * 24 * 60 * 60 * 1000;
 }
 
 type ReloadSource = () => { snapshot: ChatSnapshot; previous?: PreparationConversation[]; writing?: boolean } | undefined;
@@ -317,7 +331,7 @@ let pageDatabase: IDBDatabase | undefined;
 let durableFiles = new Set<string>();
 let restoredRows = new Set<string>();
 type OriginalRow = { id: string; blob: Blob; lastModified: number };
-type Pruning = { db: IDBDatabase; removed: Map<string, OriginalRow>; keep?: (id: string) => boolean };
+type Pruning = { db: IDBDatabase; removed: Map<string, OriginalRow>; transaction?: IDBTransaction; keep?: (id: string) => boolean };
 const pruning = new Set<Pruning>();
 
 function watchReload(db: IDBDatabase, source: ReloadSource) {
@@ -331,13 +345,24 @@ function watchReload(db: IDBDatabase, source: ReloadSource) {
     try {
       const latest = source();
       if (!latest) return;
+      // An older write may still await this retiring document's request callbacks.
+      // Release its lock before queuing a checkpoint that must commit without them.
+      let changedBase = false;
+      for (const write of pruning) if (write.db === db && write.transaction) {
+        try { write.transaction.abort(); }
+        catch (error) {
+          // Committing or finished writes may have changed the previous row base.
+          if (!(error instanceof DOMException && error.name === 'InvalidStateError')) throw error;
+          changedBase = true;
+        }
+      }
       const { conversations, attachments, ...settings } = latest.snapshot;
       const previous = new Map(latest.previous?.map(row => [row.id, row]));
       const { pack, packConversation, files } = chatEncoder();
       const reload: ReloadSnapshot = { ...settings, version: 1, attachments: pack(attachments),
         conversations: conversations.map(row => {
           const old = previous.get(row.id);
-          if (restoredRows.has(row.id)) return packConversation(row);
+          if (changedBase || restoredRows.has(row.id) || (latest.writing && row !== old)) return packConversation(row);
           if (row === old) return row.id;
           if (row.messages !== old?.messages) return packConversation(row);
           const { messages: _, attachments, ...fields } = row;
@@ -426,7 +451,7 @@ export const localChats = {
       if (!saved) return null;
       const restore = (items: StoredAttachment[] = []): ChatAttachment[] =>
         items.map(({ id, name, size }) => ({ id, name, size }));
-      return {
+      const snapshot: ChatSnapshot = {
         activeConversation: saved.activeConversation,
         draft: saved.draft,
         modelId: saved.modelId,
@@ -437,7 +462,7 @@ export const localChats = {
         conversations: saved.conversations.map((c) => ({
           ...c,
           attachments: restore(c.attachments),
-          messages: c.messages.map((m) => ({
+          messages: c.messages.filter(message => !expiredGoogleSearchHistory(message)).map((m) => ({
             ...m,
             ...(m.status === 'streaming'
               ? { status: 'stopped' as const, activity: undefined }
@@ -448,6 +473,10 @@ export const localChats = {
           })),
         })),
       };
+      if (snapshot.conversations.some((conversation, index) =>
+        conversation.messages.length !== saved.conversations[index].messages.length))
+        await localChats.write(snapshot);
+      return snapshot;
     } finally {
       if (!retained) db.close();
     }
@@ -460,6 +489,7 @@ export const localChats = {
     if (prune) pruning.add(prune);
     try {
       const tx = db.transaction(['state', 'files'], 'readwrite');
+      if (prune) prune.transaction = tx;
       const done = completed(tx);
       void done.catch(() => {});
       const state = tx.objectStore('state'), originals = tx.objectStore('files');

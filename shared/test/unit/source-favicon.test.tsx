@@ -58,7 +58,7 @@ describe('引用图标的固定图片来源', () => {
     const html = readFileSync(new URL('../../index.html', import.meta.url), 'utf8');
     const policy = html.match(/content="(default-src[^"]+)"/)![1];
     expect(policy.match(/img-src ([^;]+)/)![1].split(' ')).toEqual([
-      "'self'", 'data:', 'https://a.favicon.im',
+      "'self'", 'data:', 'https://a.favicon.im', 'https://www.gstatic.com',
     ]);
     expect(policy.match(/connect-src ([^;]+)/)![1]).toBe(
       "'self'",

@@ -121,6 +121,9 @@ export function restrictWindowNavigation(win: Pick<BrowserWindow, 'webContents'>
   });
   contents.setWindowOpenHandler(() => ({ action: 'deny' }));
   contents.on('will-navigate', (event) => event.preventDefault());
+  contents.on('will-frame-navigate', (event) => {
+    if (!event.isMainFrame && event.url !== 'about:srcdoc') event.preventDefault();
+  });
 }
 
 /** Keep every quit attempt behind the same retirement barrier. */

@@ -1,6 +1,6 @@
 import type { ChatEvent, ChatRequest, ChatSource, TokenUsage } from '../../contracts/chat';
 import { mergeActivityLog, type ChatActivity } from '../../contracts/activity';
-import { encodeAttachmentBody, noWebSearchInstructions, prepareResponseInput } from '../chat/input';
+import { encodeAttachmentBody, noWebSearchInstructions, prepareResponseInput, publicWebSearchInstructions } from '../chat/input';
 import { ProfileOutputError, profileContext } from '../chat/profile';
 import { ProfilePreviews } from '../chat/profilePreviews';
 import { verifySkillProposal } from '../chat/proposal';
@@ -36,7 +36,7 @@ export function messagesBody(
   });
   let instructions = request.instructions + profileContext(request);
   if (flashSearch || responsesSearch) {
-    instructions += '\n需要最新资料或核验时，使用联网搜索查找公开信息，并引用本轮实际检索到的来源。搜索词和网址不得包含个人资料、私人附件或知识库内容。';
+    instructions += publicWebSearchInstructions;
   } else if (!skipSearchNote) {
     instructions += noWebSearchInstructions;
   }

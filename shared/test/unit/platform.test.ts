@@ -256,6 +256,13 @@ describe('桌面平台边界', () => {
     const event = { preventDefault: vi.fn() };
     contents.on.mock.calls.find(([name]) => name === 'will-navigate')![1](event);
     expect(event.preventDefault).toHaveBeenCalledOnce();
+    const navigateFrame = contents.on.mock.calls.find(([name]) => name === 'will-frame-navigate')![1];
+    const child = { isMainFrame: false, url: 'https://example.org/', preventDefault: vi.fn() };
+    navigateFrame(child);
+    expect(child.preventDefault).toHaveBeenCalledOnce();
+    const snippet = { isMainFrame: false, url: 'about:srcdoc', preventDefault: vi.fn() };
+    navigateFrame(snippet);
+    expect(snippet.preventDefault).not.toHaveBeenCalled();
     expect(contents.setZoomFactor).toHaveBeenCalledWith(1);
     expect(contents.setVisualZoomLevelLimits).toHaveBeenCalledWith(1, 1);
     const input = contents.on.mock.calls.find(([name]) => name === 'before-input-event')![1];

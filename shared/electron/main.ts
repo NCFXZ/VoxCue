@@ -99,7 +99,7 @@ import {
   validateInterviewModel,
   validateInterviewInput,
 } from './application/speech';
-import { handleDesktop, onDesktop, sendDesktop } from './ipc/handle';
+import { handleDesktop, isMainDocumentNavigation, onDesktop, sendDesktop } from './ipc/handle';
 import { InterviewShortcutController, interviewShortcutsBounds } from './interviewShortcuts';
 import { defaultShortcuts } from './contracts/shortcuts';
 import type { InterviewShortcutsState } from './contracts/desktop';
@@ -654,9 +654,8 @@ function setInterviewShortcutsOpen(open: boolean): boolean {
     notifyShortcutsOpen();
     const win = interviewShortcutsWindow;
     if (win && shortcutsVisibility)
-      void shortcutsVisibility.set(false).then((completed) => {
-        if (completed && !interviewShortcutsRequested && !win.isDestroyed()) win.destroy();
-      });
+      // Keep this interview's ready helper so showing it again does not reload its renderer.
+      void shortcutsVisibility.set(false);
     else closeInterviewShortcuts();
     return false;
   }
@@ -1106,6 +1105,7 @@ function createMainWindow() {
   });
   loadWindowPage(mainWindow, 'main', indexFile, environment.devServerUrl);
   mainWindow.on('closed', () => {
+    if (win === mainWindow) chatIpc?.cancelActive();
     if (savedInputWindow?.win === win) savedInputWindow = undefined;
     void activeProfile?.coordinator.cancelBatch().catch(() => {});
     chatIpc?.cancelModels();
@@ -1124,7 +1124,9 @@ function createMainWindow() {
     speechSessions?.releaseDictation();
     chatIpc?.cancelActive();
   };
-  win.webContents.on('did-start-loading', releasePageRequests);
+  win.webContents.on('did-start-navigation', (details) => {
+    if (isMainDocumentNavigation(details)) releasePageRequests();
+  });
   win.webContents.on('render-process-gone', () => {
     if (win !== mainWindow || win.isDestroyed()) return;
     releasePageRequests();
@@ -2291,16 +2293,22 @@ app.whenReady().then(async () => {
     viewState: remoteViewState,
   });
   let shortcutCaptureWindow: BrowserWindow | null = null;
+  let releaseShortcutCaptureCrash: (() => void) | undefined;
   const endShortcutCapture = () => {
+    releaseShortcutCaptureCrash?.();
+    releaseShortcutCaptureCrash = undefined;
     shortcutCaptureWindow?.removeListener('blur', endShortcutCapture);
     shortcutCaptureWindow?.removeListener('closed', endShortcutCapture);
     if (shortcutCaptureWindow && !shortcutCaptureWindow.isDestroyed()) {
-      shortcutCaptureWindow.webContents.removeListener('did-start-loading', endShortcutCapture);
+      shortcutCaptureWindow.webContents.removeListener('did-start-navigation', endShortcutCaptureOnNavigation);
       if (desktopPlatform.id === 'darwin' && !shortcutCaptureWindow.webContents.isDestroyed())
         shortcutCaptureWindow.webContents.setIgnoreMenuShortcuts(false);
     }
     shortcutCaptureWindow = null;
     shortcutController.capture(false);
+  };
+  const endShortcutCaptureOnNavigation = (details: Electron.WebContentsDidStartNavigationEventParams) => {
+    if (isMainDocumentNavigation(details)) endShortcutCapture();
   };
   registerShortcutSettingsIpc({
     mac: desktopPlatform.id === 'darwin',
@@ -2331,10 +2339,18 @@ app.whenReady().then(async () => {
         else {
           if (!shortcutCaptureWindow) {
             shortcutCaptureWindow = win;
+            const contents = win.webContents;
+            const gone = () => {
+              if (shortcutCaptureWindow === win && releaseShortcutCaptureCrash === release)
+                endShortcutCapture();
+            };
+            const release = () => contents.removeListener('render-process-gone', gone);
+            releaseShortcutCaptureCrash = release;
+            contents.once('render-process-gone', gone);
             if (desktopPlatform.id === 'darwin') win.webContents.setIgnoreMenuShortcuts(true);
             win.once('blur', endShortcutCapture);
             win.once('closed', endShortcutCapture);
-            win.webContents.once('did-start-loading', endShortcutCapture);
+            win.webContents.on('did-start-navigation', endShortcutCaptureOnNavigation);
           }
           shortcutController.capture(true);
         }
@@ -2618,19 +2634,19 @@ app.whenReady().then(async () => {
         !mainWindow.isDestroyed()
       )
         sendDesktop(mainWindow.webContents, 'dictation:event', event);
-      if (
-        speechSessions?.target === 'interview' &&
-        interviewWindow &&
-        !interviewWindow.isDestroyed()
-      ) {
+      const coordinator = speechSessions, owner = interviewWindow;
+      if (coordinator?.target === 'interview' && owner && !owner.isDestroyed()) {
+        const current = () => owner === interviewWindow && !owner.isDestroyed() &&
+          coordinator === speechSessions && coordinator.target === 'interview';
         if (event.type === 'status') {
-          speechSessions.observeInterviewStatus(event.status);
+          coordinator.observeInterviewStatus(event.status);
+          if (!current()) return;
           if (event.status.state === 'error') {
             interviewAudioIntent.cancel();
-            speechSessions.cancelInput();
+            coordinator.cancelInput();
           }
         }
-        if (speechSessions.blocksInput(event)) return;
+        if (coordinator.blocksInput(event) || !current()) return;
         if (event.type === 'status') telemetry?.speechState(event.status.state);
         if (
           event.type === 'segment' &&
@@ -2639,8 +2655,9 @@ app.whenReady().then(async () => {
           event.segment.reason !== 'discontinuity'
         )
           telemetry?.transcript(event.segment.id);
-        interviewContext.event(event, questionSource(speechSessions.inputState?.inputMode));
-        sendDesktop(interviewWindow.webContents, 'speech:event', event);
+        if (!current()) return;
+        interviewContext.event(event, questionSource(coordinator.inputState?.inputMode));
+        if (current()) sendDesktop(owner.webContents, 'speech:event', event);
       }
     },
     resources.speechProcess,
@@ -2863,8 +2880,12 @@ app.whenReady().then(async () => {
     let stage: TelemetryStage = 'preflight';
     const openingAbort = new AbortController();
     const abortOpening = () => openingAbort.abort();
+    const openingNavigation = (details: Electron.WebContentsDidStartNavigationEventParams) => {
+      if (isMainDocumentNavigation(details)) abortOpening();
+    };
     event.sender.once('destroyed', abortOpening);
-    event.sender.once('did-start-loading', abortOpening);
+    event.sender.once('render-process-gone', abortOpening);
+    event.sender.on('did-start-navigation', openingNavigation);
     const assertOpeningOwner = () => {
       openingAbort.signal.throwIfAborted();
       if (
@@ -2927,7 +2948,8 @@ app.whenReady().then(async () => {
       throw error;
     } finally {
       event.sender.removeListener('destroyed', abortOpening);
-      event.sender.removeListener('did-start-loading', abortOpening);
+      event.sender.removeListener('render-process-gone', abortOpening);
+      event.sender.removeListener('did-start-navigation', openingNavigation);
       interviewOpening = false;
       notifyCloudSyncAvailable();
       updates?.refresh();

@@ -4,7 +4,9 @@ export type { ApiKeyField, ApiKeyPromptCommand } from './presentation';
 /** Public connection metadata. Only the main process handles credentials. */
 export const apiProviders = {
   openai: { name: 'OpenAI API', recipient: 'OpenAI', balance: false },
+  gemini: { name: 'Gemini API', recipient: 'Google', balance: false },
   deepseek: { name: 'DeepSeek', recipient: 'DeepSeek', balance: true },
+  kimi: { name: 'Kimi', recipient: 'Moonshot AI', balance: true },
 } as const;
 export type ApiProvider = keyof typeof apiProviders;
 export const apiProviderIds = Object.keys(apiProviders) as ApiProvider[];
@@ -13,7 +15,7 @@ export function isApiProvider(value: unknown): value is ApiProvider {
 }
 
 // Historical IDs only, shared by upgrade cleanup and answer attribution.
-export const retiredApiProviderIds = ['anthropic', 'gemini', 'kimi', 'glm', 'doubao', 'qwen'] as const;
+export const retiredApiProviderIds = ['anthropic', 'glm', 'doubao', 'qwen'] as const;
 const retiredApiProviders: ReadonlySet<string> = new Set(retiredApiProviderIds);
 export function isRetiredApiProvider(value: unknown): boolean {
   return typeof value === 'string' && retiredApiProviders.has(value);

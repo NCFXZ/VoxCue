@@ -37,7 +37,7 @@ it('lists public configuration without decrypting any credentials and isolates p
 it('unlinks each retired API credential across the local and cloud profiles on this device', async () => {
   const crypto = encryption();
   const retiredNames = [
-    'anthropic.json', 'doubao.json', 'gemini.json', 'glm.json', 'kimi.json',
+    'anthropic.json', 'doubao.json', 'glm.json',
     'qwen.json', 'qwen-ai-payg.json',
   ];
   const directories: string[] = [];
@@ -46,11 +46,15 @@ it('unlinks each retired API credential across the local and cloud profiles on t
     const store = new ApiCredentialStore(profile, crypto);
     await store.save('openai', { key: 'synthetic' });
     await store.save('deepseek', { key: 'synthetic' });
+    await store.save('kimi', { key: 'synthetic-kimi' });
+    await store.save('gemini', { key: 'synthetic-gemini' });
     const directory = path.join(profile, 'auth-data', 'api-keys');
     directories.push(directory);
     for (const name of retiredNames)
       await writeFile(path.join(directory, name), Buffer.from([0, 255, 0, 255]));
-    expect(await store.list()).toEqual([{ provider: 'openai' }, { provider: 'deepseek' }]);
+    expect(await store.list()).toEqual([
+      { provider: 'openai' }, { provider: 'gemini' }, { provider: 'deepseek' }, { provider: 'kimi' },
+    ]);
   }
   const unowned = path.join(root, 'account-profiles', 'not-a-profile', 'auth-data', 'api-keys');
   await mkdir(unowned, { recursive: true });
@@ -60,10 +64,10 @@ it('unlinks each retired API credential across the local and cloud profiles on t
   await removeRetiredApiKeyRecords(root);
   expect(crypto.decrypt).not.toHaveBeenCalled();
   for (const directory of directories)
-    expect((await readdir(directory)).sort()).toEqual(['deepseek.json', 'openai.json']);
+    expect((await readdir(directory)).sort()).toEqual(['deepseek.json', 'gemini.json', 'kimi.json', 'openai.json']);
   expect(await readFile(path.join(unowned, 'qwen.json'), 'utf8')).toBe('outside profile scope');
   await expect(readApiKeyRecords(root, async value => crypto.decrypt(value))).resolves.toBe(true);
-  expect(crypto.decrypt).toHaveBeenCalledTimes(4);
+  expect(crypto.decrypt).toHaveBeenCalledTimes(8);
 });
 
 it('preserves unknown records in the app directory and defers historical system-key cleanup', async () => {

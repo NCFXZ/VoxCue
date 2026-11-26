@@ -1,14 +1,19 @@
-.app-dialog[open],
-.app-dialog[open]:not([data-backdrop='transparent'])::backdrop {
+.app-dialog[open] {
   /* Release the opacity layer after entry so menus can blur across the dialog edge. */
   animation: modal-fade-in var(--panel-motion-duration, 240ms)
     var(--panel-motion-easing, cubic-bezier(0.2, 0, 0, 1)) backwards;
 }
 
+.app-dialog[open]:not([data-backdrop='transparent'])::backdrop {
+  animation: modal-backdrop-fade-in var(--panel-motion-duration, 240ms)
+    var(--panel-motion-easing, cubic-bezier(0.2, 0, 0, 1)) backwards;
+}
+
+/* Closing leaves sooner than opening, so the next action is not held behind the fade. */
 .app-dialog[data-modal-exit],
 .app-dialog[data-modal-exit]:not([data-backdrop='transparent'])::backdrop {
   pointer-events: none;
-  animation: modal-fade-out var(--panel-motion-duration, 240ms)
+  animation: modal-fade-out var(--panel-motion-exit-duration, 180ms)
     var(--panel-motion-easing, cubic-bezier(0.2, 0, 0, 1)) both;
 }
 
@@ -20,7 +25,19 @@
   pointer-events: none;
 }
 
+/* The dialog settles a few pixels upward; translate keeps its measured size unchanged. */
 @keyframes modal-fade-in {
+  from {
+    opacity: 0;
+    translate: 0 8px;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+  }
+}
+
+@keyframes modal-backdrop-fade-in {
   from {
     opacity: 0;
   }
@@ -29,12 +46,15 @@
   }
 }
 
+/* The closing snapshot sinks back a little, less than it rose, within its shorter fade. */
 @keyframes modal-fade-out {
   from {
     opacity: var(--modal-exit-opacity, 1);
+    translate: 0 0;
   }
   to {
     opacity: 0;
+    translate: 0 4px;
   }
 }
 

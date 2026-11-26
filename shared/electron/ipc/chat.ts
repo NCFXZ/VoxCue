@@ -130,12 +130,14 @@ export function registerChatIpc(dependencies: Dependencies) {
         (value) => {
           if (value.id === validated.id && !controller.signal.aborted && current()) {
             if (value.type === 'delta' && value.text.trim()) metric?.first();
+            if (value.type === 'delta' && value.replace) partial.googleSearchSuggestions = undefined;
             if (value.type === 'delta')
               partial.answerText = ((value.replace ? '' : partial.answerText ?? '') + value.text).slice(0, 1000000);
             if (value.type === 'reasoning-summary')
               partial.reasoningSummary = value.text.slice(0, 100000);
             if (value.type === 'profile-preview') partial.profilePreview = value.preview;
             if (value.type === 'sources') partial.sources = value.sources;
+            if (value.type === 'google-search-suggestions') partial.googleSearchSuggestions = value.html;
             if (value.type === 'activity') {
               partial.activity = value.activity;
               partial.activities = mergeActivityLog(partial.activities, value.activity);

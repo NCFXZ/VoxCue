@@ -24,6 +24,8 @@ React components → stores / services → DesktopAPI
 
 窗口保持 contextIsolation、sandbox 开启，nodeIntegration 关闭。取消、切换、退出和重载必须释放资源并拒绝旧任务写回；失败明确返回，真实服务不转 Mock。架构检查覆盖两平台依赖图、生产/测试隔离及 Renderer 边界。
 
+导航引起的 owner 请求释放仅在主 frame 跨文档导航时触发，子 frame 加载／重载与主 frame 同文档导航不会中止 owner 请求，owner 销毁仍取消旧请求。
+
 ## 界面与本地状态
 
 两平台编译同一 shared/src 界面、主题、材质、无障碍语义和交互；Mac 使用 SF Symbols，Windows 使用 Fluent 图标。系统窗口、权限、音频、凭据和更新由适配器处理。面试实窗及预览共用 interviewAppearance 的固定深色及透明度参数；减少动态效果、减少透明度沿用统一降级。详见 [共用桌面界面](PLATFORM_UI.md)。
@@ -40,11 +42,15 @@ ChatGPT 与 GitHub Copilot 使用各自受控 Provider/官方运行时端口，�
 
 设置中已登录的账号支持独立展开额度。显式读取未启用账号的额度时，IPC 只接收固定服务名称，业务仍通过对应官方运行时校验授权，不改变当前服务选择。Renderer 的额度请求按服务隔离，收起、退出账号或切换后丢弃迟到结果。
 
-OpenAI 与 DeepSeek 的 API 密钥连接共用聊天服务端口。每个账户的 `ProfileApiConnections` 协调密钥验证与取消，`backend/api` 管理厂商端点、模型能力、流式响应与余额。设置页的模态框负责标题、主题和操作按钮，平台适配器把安全密码控件嵌入主窗口。IPC 按窗口、主帧和请求 ID 路由控件位置、焦点与提交。主进程根据模型目录验证密钥。验证后在账户目录保存系统加密的密钥，用户单独选择当前连接。新版启动按固定文件名清理本机各账号的停用 API 密钥记录。历史回答使用「未知模型」标题呈现停用 API 的来源。
+OpenAI、Gemini、DeepSeek 与 Kimi 的 API 密钥连接共用聊天服务端口。每个账户的 `ProfileApiConnections` 协调密钥验证与取消，`backend/api` 管理厂商端点、模型能力、流式响应与余额。设置页的模态框负责标题、主题和操作按钮，平台适配器把安全密码控件嵌入主窗口。IPC 按窗口、主帧和请求 ID 路由控件位置、焦点与提交。主进程根据模型目录验证密钥。验证后在账户目录保存系统加密的密钥，用户单独选择当前连接。新版启动按固定文件名清理本机各账号的停用 API 密钥记录。历史回答使用「未知模型」标题呈现停用 API 的来源。
 
-面试准备允许当前服务商及模型支持的官方网页搜索。OpenAI 和 Copilot 使用模型声明的工具，DeepSeek Flash 与 V4 Pro 分别使用 Chat Completions 和 Responses 搜索。应用只将通过校验的实际来源作为聊天引用，工具参数、推理和签名不随聊天历史保存。DeepSeek 内容审核拒答后清除已经显示的正文、预览与来源。实时面试的 IPC 固定传入 `webSearch: false`。[DeepSeek 联网工具协议](https://api-docs.deepseek.com/guides/web_tools/)
+面试准备允许当前服务商及模型支持的官方网页搜索。Kimi 使用国内开放平台的 Responses API，模型目录只展示该接口支持且密钥可用的 K3、K3.1 Pro 和 K3.1 Pro Highspeed。准备聊天可使用 Kimi 服务端的网页搜索。[Kimi Responses API](https://platform.kimi.com/docs/api/responses)
 
-DeepSeek 准备聊天使用文本资料协议：首行标明本轮是否提出资料修改，随后的 Markdown 正文直接流式显示，只有声明修改时才在末尾的 `<profile_proposal>` 中给出 `changes`、`skillScope` JSON。DeepSeek 网页工具只接受文本输出，Flash、V4 Pro 和格式重试都不启用服务端 JSON 模式。缺少意图标记、意图与提案矛盾、提案不完整或与当前资料相同时，正文照常显示并保留搜索结果，随后用同一模型、不带工具的短请求只补问本轮意图和提案；补问仍无法确定时明确报错，不把未声明结构的正文当作完成的回答。只有空白回答才整段重试。预览字段可在生成中查看，保存只接受验证通过且与当前资料不同的字段。协议、解析和重试提示集中在 `backend/api/deepseekProfile.ts`，ChatGPT、Copilot 和 OpenAI API 继续使用共享 JSON 提案解析。
+Gemini 使用 Google 原生 `models` 和 `streamGenerateContent` 接口，密钥仅放在主进程请求的 `x-goog-api-key` 头中。目录按服务商返回的生成方法筛选对话模型，已知模型按其能力提供思考强度，其他模型保留自动模式。准备聊天复用 JSON 资料提案和预览恢复机制，支持的模型按请求启用 `google_search`，实际返回的搜索元数据用于来源展示与技能来源核验。Google 原始搜索建议经有大小上限的事件和结果字段传递，在禁用脚本的隔离文档内显示，链接仍通过主窗口校验后打开，子 frame 的外部导航被阻止。建议 HTML、搜索链接和活动元数据保持瞬时状态，联网回复文本在聊天历史保留不超过 730 天并排除出后续模型上下文，用户主动确认的资料单独保存。面试复用现有回答入口，用量按当前密钥独立记录，余额在 Google AI Studio 官方账单查看。[Gemini API](https://aistudio.google.com/docs/text-generation?generate-content=true)、[Google Search 展示要求](https://aistudio.google.com/docs/google-search?generate-content=true)
+
+OpenAI 和 Copilot 使用模型声明的工具，DeepSeek Flash 与 V4 Pro 分别使用 Chat Completions 和 Responses 搜索。应用只将通过校验的实际来源作为聊天引用，工具参数、推理和签名不随聊天历史保存。DeepSeek 内容审核拒答后清除已经显示的正文、预览与来源。实时面试的 IPC 固定传入 `webSearch: false`。[DeepSeek 联网工具协议](https://api-docs.deepseek.com/guides/web_tools/)
+
+DeepSeek 准备聊天使用文本资料协议：首行标明本轮是否提出资料修改，随后的 Markdown 正文直接流式显示，只有声明修改时才在末尾的 `<profile_proposal>` 中给出 `changes`、`skillScope` JSON。DeepSeek 网页工具只接受文本输出，Flash、V4 Pro 和格式重试都不启用服务端 JSON 模式。缺少意图标记、意图与提案矛盾、提案不完整或与当前资料相同时，正文照常显示并保留搜索结果，随后用同一模型、不带工具的短请求只补问本轮意图和提案；补问仍无法确定时明确报错，不把未声明结构的正文当作完成的回答。只有空白回答才整段重试。预览字段可在生成中查看，保存只接受验证通过且与当前资料不同的字段。协议、解析和重试提示集中在 `backend/api/deepseekProfile.ts`，ChatGPT、Copilot、OpenAI API 与 Kimi 使用共享 JSON 提案解析。
 
 backend/cloud 管理主账号、额度和资料同步，令牌按服务 origin 隔离并由主进程系统加密。同步处理本地版本、分类开关、单项暂停、取消和显式冲突选择；跨账号迟到结果不得回写。账号服务位于独立 VoxCue-server 仓库，桌面测试只读取校验后的固定服务端基线，不部署或修改服务端。
 

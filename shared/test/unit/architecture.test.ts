@@ -122,6 +122,7 @@ describe('长期模块边界', () => {
     ['shared/src/mobile/App.tsx', 'shared/src/components/InterviewReveal.tsx'],
     ['shared/src/components/ui/content-reveal.tsx', 'shared/src/stores/interview.ts'],
     ['shared/src/components/ui/useHeightTransition.ts', 'shared/src/services/desktop.ts'],
+    ['shared/src/components/ui/motion-continuation.ts', 'shared/src/services/desktop.ts'],
     ['shared/src/services/bad.ts', 'node:fs'],
     ['macos/src/bad.tsx', 'node:fs'],
     ['macos/src/bad.tsx', 'shared/electron/backend/auth/storage.ts'],

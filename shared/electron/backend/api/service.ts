@@ -12,6 +12,8 @@ import { recoverApiProfileOutput } from '../chat/profileRecovery';
 import { validateRequest } from '../chat/validation';
 import type { UsageLedger } from '../chat/usage';
 import { deepseekApi } from './catalogs';
+import { kimiApi } from './kimi';
+import { createGeminiChatService } from './gemini';
 import { deepSeekProSearchModel, deepSeekResponsesEvents, prepareDeepSeekResponsesRequest } from './deepseekResponses';
 import { deepSeekProfileRecovery, deepSeekStructureRequest } from './deepseekProfile';
 import { messagesBody, receiveMessages } from './messages';
@@ -86,6 +88,36 @@ function checkApiResponse(response: Response) {
   throw apiFailure(response.status);
 }
 
+function kimiFailure(status: number | undefined, body: unknown) {
+  const error = record(record(body)?.error) ?? record(body);
+  // A stream `error` event carries its reason in `code`; its `type` is the event name.
+  const type = [error?.type, error?.code].find(value => typeof value === 'string' && value !== 'error');
+  if (type === 'exceeded_current_quota_error')
+    return new ChatServiceError({ status, code: type, message: 'API 账户可用余额不足，请查看服务商账单。' });
+  if (type === 'engine_overloaded_error')
+    return new ChatServiceError({ status, code: type, message: '当前模型繁忙，请稍后重试。' });
+  if (type === 'rate_limit_reached_error' || type === 'rate_limit_exceeded') {
+    // Read only the limit kind and number; the upstream message also names the account.
+    const text = typeof error?.message === 'string' ? error.message : '';
+    const kind = text.match(/\b(RPM|TPM|TPD|concurrency)\b/i)?.[1].toUpperCase();
+    const limit = kind ? text.match(/\blimit:\s*(\d{1,9})\b/)?.[1] : undefined;
+    const reached = kind && kimiLimits[kind as keyof typeof kimiLimits];
+    return new ChatServiceError({
+      status, code: type,
+      message: reached
+        ? `已达到 Kimi 账户的${reached[0]}上限${limit ? `（${limit}${reached[1]}）` : ''}，${reached[2]}。限额随累计充值等级提高。`
+        : 'API 服务已达到调用限额，请查看服务商用量或稍后重试。',
+    });
+  }
+  return apiFailure(status);
+}
+const kimiLimits = {
+  RPM: ['每分钟请求次数', ' 次', '请约 1 分钟后重试'],
+  TPM: ['每分钟 token', ' token', '请约 1 分钟后重试'],
+  TPD: ['每日 token', ' token', '请明天再试'],
+  CONCURRENCY: ['同时请求数', ' 个', '请等待其他回答结束后重试'],
+} as const;
+
 function getJson(
   credential: ApiCredential,
   fetcher: typeof fetch,
@@ -119,9 +151,10 @@ export async function readApiBalance(
   signal = new AbortController().signal,
   fetcher: typeof fetch = fetch,
 ): Promise<ApiBalance[]> {
-  if (provider !== 'deepseek') return [];
+  if (provider !== 'deepseek' && provider !== 'kimi') return [];
   const deadline = AbortSignal.any([signal, AbortSignal.timeout(15000)]);
-  return deepseekApi.balance(getJson(credential, fetcher, deadline));
+  const api = provider === 'kimi' ? kimiApi : deepseekApi;
+  return api.balance(getJson(credential, fetcher, deadline));
 }
 
 export function createApiChatService(
@@ -131,12 +164,15 @@ export function createApiChatService(
   fetcher: typeof fetch = fetch,
 ): ApiChatService {
   const owner = identity(provider);
-  if (provider === 'openai') {
+  if (provider === 'gemini')
+    return createGeminiChatService(owner, credential, secret => accountOf(provider, secret), ledger, fetcher);
+  if (provider === 'openai' || provider === 'kimi') {
     return new ChatGPTService({
       provider: owner,
       ledger,
       fetch: fetcher,
-      failure: openAIFailure,
+      apiKeyEndpoint: provider === 'kimi' ? kimiApi : undefined,
+      failure: provider === 'kimi' ? kimiFailure : openAIFailure,
       access: async () => {
         const secret = await credential();
         return { kind: 'api-key', token: secret.key, account: accountOf(provider, secret) };

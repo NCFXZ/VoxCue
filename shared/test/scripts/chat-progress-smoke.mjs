@@ -14,6 +14,15 @@ import {
   focusUiWindow,
 } from './install-ui-account.mjs';
 
+const repeatReloadArguments = process.argv.filter(arg =>
+  arg === '--repeat-final-reload' || arg.startsWith('--repeat-final-reload='),
+);
+const repeatReloadValue = repeatReloadArguments[0]?.slice('--repeat-final-reload='.length) ?? '1';
+const repeatFinalReload = Number(repeatReloadValue);
+if (repeatReloadArguments.length > 1 || !/^\d+$/.test(repeatReloadValue) ||
+    !Number.isInteger(repeatFinalReload) || repeatFinalReload < 1 || repeatFinalReload > 30)
+  throw Error('--repeat-final-reload requires one integer from 1 to 30');
+
 await mkdir(path.join(testRoot, 'test/results'), { recursive: true });
 const profile = await mkdtemp(path.resolve(path.join(testRoot, 'test/results/chat-progress-')));
 const env = { ...process.env, COPILOT_TEST_USER_DATA: profile, VITE_DEV_SERVER_URL: '' };
@@ -32,6 +41,7 @@ const app = await electron.launch({
   env,
 });
 const errors = [];
+let finalReloadIteration = 0;
 try {
   await app.evaluate(({ app }) => {
     const require = process
@@ -198,7 +208,7 @@ try {
                 terminal.output.splice(1, 0, {
                   id: 'review',
                   type: 'reasoning',
-                  summary: [{ type: 'summary_text', text: '**核对资料**\n\n整理公开来源。' }],
+                  summary: [{ type: 'summary_text', text: '**核对资料**\n\n整理公开来源。\n\n1. 嵌入式开发与 MCU（STM32）基础' }],
                 });
                 controller.enqueue(
                   encode({ type: 'response.output_text.delta', output_index: 4, delta: text.slice(split) }),
@@ -273,7 +283,7 @@ try {
                   type: 'response.reasoning_summary_text.delta',
                   item_id: 'review',
                   summary_index: 0,
-                  delta: '**核对资料**\n\n整理公开来源。',
+                  delta: '**核对资料**\n\n整理公开来源。\n\n1. 嵌入式开发与 MCU（STM32）基础',
                 },
               ];
               const publish = events => events.forEach(event => controller.enqueue(encode(event)));
@@ -545,6 +555,9 @@ try {
     .locator('.reasoning-section summary')
     .filter({ hasText: '核对资料' });
   await currentTitle.waitFor();
+  // Markdown lists inside reasoning must not inherit the step row grid.
+  assert.equal(await latest().locator('.progress-reasoning .markdown-content li').first()
+    .evaluate((node) => getComputedStyle(node).display), 'list-item');
   assert.equal(await firstTitle.locator('..').getAttribute('open'), null);
   assert.equal(await currentTitle.locator('.reasoning-heading.is-active').count(), 1);
   assert.equal(
@@ -944,14 +957,26 @@ try {
   await page.getByRole('button', { name: '停止回复', exact: true }).click();
   await latest().getByText('已停止回复。', { exact: true }).waitFor();
   assert.ok((await latest().locator('.response-duration').innerText()).startsWith('已处理'));
-  await input().fill(longDraft);
-  await lineCount(11);
-  await page.reload();
-  await input().waitFor();
-  await page.waitForFunction(() =>
-    document.querySelector('[aria-label="聊天消息"]').value.includes('第20行'),
-  );
-  await lineCount(11);
+  for (let iteration = 1; iteration <= repeatFinalReload; iteration++) {
+    finalReloadIteration = iteration;
+    const expectedDraft = repeatFinalReload === 1 ? longDraft
+      : longDraft.replace('第1行', `第1行 [synthetic-reload-${iteration}]`);
+    console.log('Final draft reload:', JSON.stringify({
+      iteration, total: repeatFinalReload, length: expectedDraft.length,
+      firstLine: expectedDraft.split('\n', 1)[0],
+    }));
+    await input().fill(expectedDraft);
+    await lineCount(11);
+    assert.equal(await input().inputValue(), expectedDraft);
+    await page.reload();
+    await input().waitFor();
+    await page.waitForFunction(() =>
+      document.querySelector('[aria-label="聊天消息"]').value.includes('第20行'),
+    );
+    assert.equal(await input().inputValue(), expectedDraft);
+    await lineCount(11);
+    console.log('PASS: final draft reload', iteration, 'of', repeatFinalReload);
+  }
   const stored = page.locator('.chat-message.assistant').filter({ hasText: '进度最终回答' });
   await stored.getByText('用时 5 分钟 33 秒', { exact: true }).waitFor();
   assert.equal(await stored.locator('.response-progress-content').isVisible(), false);
@@ -996,17 +1021,64 @@ try {
     await page.screenshot({}).catch(() => {});
     console.log(
       await page
-        .evaluate(() => {
+        .evaluate(async (finalReloadIteration) => {
           const input = document.querySelector('[aria-label="聊天消息"]');
+          const draft = value => typeof value === 'string' ? {
+            length: value.length,
+            firstLine: value.split('\n', 1)[0].slice(0, 48),
+            tail: value.slice(-12),
+            hasLastLine: value.includes('第20行'),
+          } : undefined;
+          let storage;
+          const database = 'voxcue-preparation-chats';
+          if ((await indexedDB.databases()).some(db => db.name === database)) {
+            const read = request => new Promise((resolve, reject) => {
+              request.onsuccess = () => resolve(request.result);
+              request.onerror = () => reject(request.error);
+            });
+            const db = await read(indexedDB.open(database));
+            try {
+              const store = db.transaction('state', 'readonly').objectStore('state');
+              const [current, checkpoint] = await Promise.all([
+                read(store.get('current')), read(store.get('reload-checkpoint-v1')),
+              ]);
+              const summarize = saved => {
+                const active = saved?.conversations?.find(row =>
+                  (typeof row === 'string' ? row : row.id) === saved.activeConversation,
+                );
+                return saved && {
+                  version: saved.version,
+                  activeConversation: saved.activeConversation,
+                  draft: draft(saved.draft),
+                  active: typeof active === 'string' ? { reference: active } : active && {
+                    id: active.id, draft: draft(active.draft),
+                  },
+                };
+              };
+              const active = current?.version === 2 && current.activeConversation
+                ? await read(store.get(['conversation', current.activeConversation])) : undefined;
+              storage = {
+                current: summarize(current), checkpoint: summarize(checkpoint),
+                committedActive: active && { id: active.id, draft: draft(active.draft) },
+              };
+            } finally { db.close(); }
+          }
           return {
+            finalReloadIteration,
             viewport: [innerWidth, innerHeight],
             input: input && {
               width: input.clientWidth,
               height: input.clientHeight,
               scroll: input.scrollHeight,
+              disabled: input.disabled,
+              draft: draft(input.value),
             },
+            storageErrors: [...document.querySelectorAll('.simulation-disclaimer.danger-text')]
+              .map(node => node.textContent),
+            storage,
           };
-        })
+        }, finalReloadIteration)
+        .then(value => JSON.stringify(value, null, 2))
         .catch(() => ({})),
     );
   }

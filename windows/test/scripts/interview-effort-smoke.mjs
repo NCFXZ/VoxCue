@@ -213,6 +213,11 @@ try {
     await options.first().hover();
     assert.equal(await options.first().getAttribute('data-highlighted'), '');
     await options.first().press('ArrowDown');
+    const nextOption = await options.nth(1).elementHandle();
+    try {
+      // Radix schedules roving focus after keyboard dispatch has returned.
+      await page.waitForFunction(option => option === document.activeElement, nextOption);
+    } finally { await nextOption.dispose(); }
     assert.ok(await options.nth(1).evaluate(option => option === document.activeElement));
     const option = menu.getByRole('menuitemradio', { name: newModel, exact: true });
     assert.equal(await option.count(), 0);

@@ -13,6 +13,7 @@ import type { DesktopAPI } from '../../../shared/electron/contracts/desktop';
 import type { AIChatService, ChatCompletion } from '../../../shared/electron/backend/chat/ports';
 import { emptyUsage } from '../../../shared/electron/contracts/chat';
 import { defaultShortcuts } from '../../../shared/electron/contracts/shortcuts';
+import { EventEmitter } from 'node:events';
 
 const bridge = vi.hoisted(() => ({
   api: undefined as DesktopAPI | undefined,
@@ -215,8 +216,35 @@ beforeEach(() => {
 const field = { x: 220, y: 180, height: 36, width: 280, dark: true };
 const dialogId = '11111111-2222-4333-8444-555555555555';
 describe('API key IPC boundary', () => {
+  it.each(['navigation', 'destroyed', 'render-process-gone'])('keeps a prompt across subframes and same-document changes until %s', async ending => {
+    const sender = Object.assign(new EventEmitter(), { mainFrame: {} });
+    const configure = vi.fn((_config, _prompt, _check, signal: AbortSignal) =>
+      new Promise<boolean>(resolve => signal.addEventListener('abort', () => resolve(false), { once: true })));
+    const api = { list: vi.fn(), configure, remove: vi.fn(), balance: vi.fn() };
+    registerApiConnectionIpc({
+      requireMain: () => {},
+      current: () => api,
+      checkChange: () => {}, prompt: vi.fn(), control: vi.fn(), open: vi.fn(),
+    });
+    const pending = bridge.handlers.get('api-keys:configure')!(
+      { sender, senderFrame: sender.mainFrame }, { provider: 'gemini' }, dialogId, field,
+    );
+    const signal = configure.mock.calls[0][3];
+    sender.emit('did-start-navigation', { isMainFrame: false, isSameDocument: false });
+    sender.emit('did-start-navigation', { isMainFrame: true, isSameDocument: true });
+    expect(signal.aborted).toBe(false);
+    expect(sender.listenerCount('did-start-navigation')).toBe(1);
+    if (ending === 'navigation')
+      sender.emit('did-start-navigation', { isMainFrame: true, isSameDocument: false });
+    else sender.emit(ending);
+    expect(signal.aborted).toBe(true);
+    await expect(pending).resolves.toBe(false);
+    expect(sender.listenerCount('did-start-navigation')).toBe(0);
+    expect(sender.listenerCount('destroyed')).toBe(0);
+    expect(sender.listenerCount('render-process-gone')).toBe(0);
+  });
   it('allows only the main window’s main frame, connection metadata and preset provider links', async () => {
-    const main = { mainFrame: {}, once: vi.fn(), off: vi.fn() };
+    const main = { mainFrame: {}, on: vi.fn(), once: vi.fn(), off: vi.fn() };
     const owner = { sender: main, senderFrame: main.mainFrame };
     const other = { mainFrame: {} };
     const service = {
@@ -286,6 +314,10 @@ describe('API key IPC boundary', () => {
     expect(service.balance).toHaveBeenCalledWith('deepseek');
     await call('open', owner, 'deepseek', 'keys');
     await call('open', owner, 'deepseek', 'billing');
+    await call('open', owner, 'kimi', 'keys');
+    await call('open', owner, 'kimi', 'billing');
+    await call('open', owner, 'gemini', 'keys');
+    await call('open', owner, 'gemini', 'billing');
     const waiting = Promise.withResolvers<boolean>();
     service.configure.mockImplementationOnce(() => waiting.promise);
     const configuring = call('configure', owner, ...operations.configure);
@@ -300,6 +332,10 @@ describe('API key IPC boundary', () => {
       ['https://platform.openai.com/api-keys'],
       ['https://platform.deepseek.com/api_keys'],
       ['https://platform.deepseek.com/usage'],
+      ['https://platform.kimi.com/console/api-keys'],
+      ['https://platform.kimi.com/console/fee-detail'],
+      ['https://aistudio.google.com/apikey'],
+      ['https://aistudio.google.com/billing'],
     ]);
   });
 });
@@ -1451,6 +1487,21 @@ function setup(demo = false) {
   return { chat, openLink, accountUsage, lifecycle, call, sender };
 }
 describe('聊天 IPC 与应用层边界', () => {
+  it.each([false, true])('keeps Google suggestions paired with the current failed draft (replaced=%s)', async replaced => {
+    const { chat, call } = setup();
+    const html = '<div>Google suggestions</div>';
+    chat.stream.mockImplementationOnce(async (_request, emit) => {
+      emit({ id: request.id, type: 'google-search-suggestions', html });
+      emit({ id: request.id, type: 'delta', text: 'grounded answer' });
+      if (replaced) emit({ id: request.id, type: 'delta', text: 'replacement answer', replace: true });
+      throw new ChatServiceError({ code: 'network_error', message: '合成连接中断' });
+    });
+    const result = await call('chat:send', request);
+    expect(result).toMatchObject({ ok: false, partial: {
+      answerText: replaced ? 'replacement answer' : 'grounded answer',
+    } });
+    expect(result.partial.googleSearchSuggestions).toBe(replaced ? undefined : html);
+  });
   it('准备页模型目录仅接受可选布尔刷新参数', async () => {
     const { chat, call } = setup();
     await expect(call('chat:models', 'true')).rejects.toThrow('Invalid request');

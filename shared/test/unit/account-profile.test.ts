@@ -198,7 +198,8 @@ it('switches preparation and interview requests across saved API providers with 
       await profile.selection.set(provider, true);
       http.mockImplementationOnce(async (url, options) => {
         const page = await (await send(url, options)).json();
-        return Response.json({ data: page.data.slice(0, 1) });
+        const catalogField = provider === 'gemini' ? 'models' : 'data';
+        return Response.json({ [catalogField]: page[catalogField].slice(0, 1) });
       });
       const initial = await profile.ragChat.models();
       expect(initial).toHaveLength(1);

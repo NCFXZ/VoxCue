@@ -22,7 +22,7 @@
   --inset: 4px;
   --step: calc(var(--key) + var(--gap));
   --options-width: var(--key);
-  --motion: 340ms cubic-bezier(.22, .72, .15, 1);
+  --motion: 340ms var(--panel-motion-emphasized-easing);
   position: absolute;
   overflow: hidden;
   bottom: 18px;

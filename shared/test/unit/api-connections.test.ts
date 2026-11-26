@@ -77,8 +77,8 @@ it('validates before replacing credentials and keeps browser cancellation isolat
   await api.dispose();
 });
 
-it('accepts only the provider identifier for the two API connections', () => {
-  for (const provider of ['openai', 'deepseek']) {
+it('accepts only the provider identifier for the supported API connections', () => {
+  for (const provider of ['openai', 'deepseek', 'kimi', 'gemini']) {
     expect(parseApiConnectionConfig({ provider })).toStrictEqual({ provider });
   }
   for (const invalid of [

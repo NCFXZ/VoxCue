@@ -58,6 +58,7 @@ export interface ChatSource {
   title: string;
   url: string;
 }
+export const GOOGLE_SEARCH_SUGGESTIONS_LIMIT = 100000;
 export interface LocalChatSource {
   reference: string;
   itemId: string;
@@ -114,7 +115,8 @@ export type ChatEvent =
   | { id: string; type: 'reasoning-summary'; text: string }
   | { id: string; type: 'search' }
   | { id: string; type: 'activity'; activity: ChatActivity }
-  | { id: string; type: 'sources'; sources: ChatSource[] };
+  | { id: string; type: 'sources'; sources: ChatSource[] }
+  | { id: string; type: 'google-search-suggestions'; html: string };
 /** Received public content only; never a confirmable profile proposal. */
 export interface ChatPartialResponse {
   answerText?: string;
@@ -123,6 +125,7 @@ export interface ChatPartialResponse {
   activity?: ChatActivity;
   activities?: ChatActivity[];
   sources?: ChatSource[];
+  googleSearchSuggestions?: string;
 }
 export type ChatResult =
   | {
@@ -130,6 +133,7 @@ export type ChatResult =
       provider?: ModelProvider;
       usage: TokenUsage | null;
       sources: ChatSource[];
+      googleSearchSuggestions?: string;
       localSources?: LocalChatSource[];
       warning?: string;
       rag?: {

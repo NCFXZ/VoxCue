@@ -348,8 +348,11 @@ class WindowProbe {
         RequireDesktop();
         var target=new IntPtr(long.Parse(args[1]));uint expected=uint.Parse(args[2]),owner;
         if(args.Length<5||args.Length>35||(args.Length-3)%2!=0)throw new Exception("Invalid hover candidates");
-        if(GetWindowThreadProcessId(target,out owner)==0||owner!=expected||GetForegroundWindow()!=target)
-          throw new Exception("Candidate selection requires the owned foreground window");
+        var foreground=GetForegroundWindow();
+        if(GetWindowThreadProcessId(target,out owner)==0||owner!=expected||foreground!=target)
+          throw new Exception("Candidate selection requires the owned foreground window; "+
+            "OWNED_HOVER_DIAGNOSTIC="+new JavaScriptSerializer().Serialize(new{
+              expectedProcessId=expected,target=WindowOwnership(target),foreground=WindowOwnership(foreground)}));
         int left=GetSystemMetrics(76),top=GetSystemMetrics(77),width=GetSystemMetrics(78),height=GetSystemMetrics(79);
         for(int i=3;i<args.Length;i+=2) {
           int x=int.Parse(args[i]),y=int.Parse(args[i+1]);

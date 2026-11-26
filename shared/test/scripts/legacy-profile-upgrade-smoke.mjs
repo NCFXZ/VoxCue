@@ -25,13 +25,69 @@ const accountOrigin = 'https://account-fixture.example.test';
 const png =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgaDgAAAHEAUFzHAXEAAAAAElFTkSuQmCC';
 let app;
+let phase = 'seed browser storage', nativeErrors = '', bodyFailure;
+
+function observeShutdown({ app, ipcMain }) {
+  const events = globalThis.upgradeShutdown = { phase: 'launch', events: [] };
+  const record = (kind, details = {}) => {
+    const entry = { phase: events.phase, kind, ...details };
+    events.events.push(entry);
+    if (events.events.length > 80) events.events.shift();
+    console.error('SYNTHETIC_UPGRADE_SHUTDOWN ' + JSON.stringify(entry));
+  };
+  app.on('browser-window-created', (_event, win) => {
+    const contents = win.webContents, id = win.id;
+    win.on('close', event => queueMicrotask(() => record('window-close', {
+      id, prevented: event.defaultPrevented, destroyed: win.isDestroyed(),
+    })));
+    win.on('closed', () => record('window-closed', { id }));
+    contents.on('render-process-gone', (_event, details) => record('renderer-gone', {
+      id, reason: details.reason, exitCode: details.exitCode,
+    }));
+    const send = contents.send;
+    contents.send = function(channel, ...args) {
+      if (channel === 'session:request-close') record('session-request-close', { id, request: args[0] });
+      return send.call(this, channel, ...args);
+    };
+  });
+  const handle = ipcMain.handle.bind(ipcMain);
+  ipcMain.handle = (channel, listener) => handle(channel, channel !== 'session:close-ready' ? listener : (...args) => {
+    record('session-close-ready', { contents: args[0].sender.id, request: args[1], saved: args[2] });
+    return listener(...args);
+  });
+  for (const kind of ['before-quit', 'will-quit', 'quit', 'window-all-closed'])
+    app.on(kind, () => record(kind));
+}
 
 async function launch(script) {
-  await writeFile(shell, script);
+  await writeFile(shell, '(' + observeShutdown.toString() + ')(require("electron"));\n' + script);
+  nativeErrors = '';
   app = await electron.launch({
     args: [await offlineElectronEntry(shell)],
     env: { ...process.env, COPILOT_TEST_USER_DATA: profile, VOXCUE_ACCOUNT_API: accountOrigin, VITE_DEV_SERVER_URL: '' },
   });
+  app.process().stderr?.on('data', chunk => { nativeErrors = (nativeErrors + String(chunk)).slice(-16000); });
+}
+async function closeCurrentApp(stage) {
+  const target = app;
+  if (!target) return;
+  phase = 'close: ' + stage;
+  console.log('Legacy upgrade close:', phase, JSON.stringify(await target.evaluate(({ BrowserWindow }, phase) => {
+    if (globalThis.upgradeShutdown) globalThis.upgradeShutdown.phase = phase;
+    return {
+      windows: BrowserWindow.getAllWindows().map(win => ({
+        id: win.id, contents: win.webContents.id, role: new URL(win.webContents.getURL() || 'about:blank').hash || 'main',
+        visible: win.isVisible(), crashed: win.webContents.isCrashed(), loading: win.webContents.isLoading(),
+      })),
+      events: globalThis.upgradeShutdown?.events,
+    };
+  }, phase).catch(error => ({ unavailable: error.message }))));
+  try { await closeUiApp(target); }
+  catch (error) {
+    console.error('Legacy upgrade close failed:', phase, error, '\nNative shutdown events/errors:\n' + nativeErrors);
+    throw error;
+  }
+  if (app === target) app = undefined;
 }
 async function pageFor(hash) {
   const end = Date.now() + 45000;
@@ -330,8 +386,7 @@ try {
   await app.evaluate(({ BrowserWindow }) => {
     for (const win of BrowserWindow.getAllWindows()) win.webContents.session.flushStorageData();
   });
-  await closeUiApp(app);
-  app = undefined;
+  await closeCurrentApp('seed browser storage');
   const images = path.join(profile, 'interview-images-v1');
   await mkdir(images);
   await writeFile(path.join(images, picture + '.image'), Buffer.from(png, 'base64'));
@@ -392,8 +447,8 @@ try {
   main = await switchUser(main, users[0]);
   assert.deepEqual(await inspect(main), merged);
   await checkSyncSettings(main, [true, false, true]);
-  await closeUiApp(app);
-  app = undefined;
+  await closeCurrentApp('A/B account roundtrip');
+  phase = 'restore A after restart';
   await normalLaunch();
   main = await pageFor('');
   assert.deepEqual(await inspect(main), merged);
@@ -404,6 +459,7 @@ try {
   if (process.platform === 'win32') {
     // Simulate a stop after the server committed A's deletion and its acknowledgement
     // reached disk, but before this upgrade claimant's browser and files were cleared.
+    phase = 'commit A erasure receipt';
     await app.evaluate(async ({ app }, { backend, accountOrigin, id }) => {
       const load = process.getBuiltinModule('module').createRequire(app.getAppPath() + '/package.json');
       const { createCredentialVault } = load(backend + '/backend/cloud/vault.js');
@@ -413,14 +469,15 @@ try {
       const { entry } = await receipts.prepare(id, true);
       await receipts.commit(entry);
     }, { backend, accountOrigin, id: users[0].id });
-    await closeUiApp(app);
-    app = undefined;
+    await closeCurrentApp('committed A erasure receipt');
+    phase = 'verify pending A erasure originals';
     const { profileDirectory } = workspace.platformRequire(path.join(backend, 'accountProfilePaths.js'));
     const erased = [profileDirectory(profile, 'account:' + users[0].id),
       path.join(images, picture + '.image'), path.join(images, picture + '.preview'),
       path.join(profile, 'account-erasure-intents', users[0].id + '.bin')];
     for (const file of erased) await stat(file);
     await writeFile(selected, '1');
+    phase = 'cold-start A erasure and B recovery';
     await normalLaunch(erased);
     main = await pageFor('');
     assert.equal((await inspect(main)).profile, 'Owner B only');
@@ -430,6 +487,14 @@ try {
     for (const file of erased) await assert.rejects(stat(file), { code: 'ENOENT' });
     console.log('PASS cold-start erasure closed the last legacy window, erased only claimant A and its receipt, then opened B with its own data');
   }
+} catch (error) {
+  bodyFailure = error;
+  console.error('Legacy upgrade failed before teardown:', phase, error, '\nNative errors:\n' + nativeErrors);
+  throw error;
 } finally {
-  if (app) await closeUiApp(app);
+  try { if (app) await closeCurrentApp('final cleanup after ' + phase); }
+  catch (error) {
+    if (bodyFailure) throw new AggregateError([bodyFailure, error], 'Legacy upgrade body and teardown both failed');
+    throw error;
+  }
 }

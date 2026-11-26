@@ -87,7 +87,6 @@ interface PreparationState {
   selectSkillIds(messageId: string, ids: string[]): void;
   updateInfo(info: Partial<PersonalInfo>, messageId?: string): boolean;
   dismissProfile(messageId: string): void;
-  removeResume(): Promise<boolean>;
 }
 export const usePreparation = create<PreparationState>((set, get) => ({
   conversations: [],
@@ -616,6 +615,7 @@ export const usePreparation = create<PreparationState>((set, get) => ({
           status: 'streaming',
           startedAt: Date.now(),
           durationMs: 0,
+          ...(selected.provider?.id === 'gemini' && options.webSearch ? { googleSearchGroundedAt: Date.now() } : {}),
         },
       ],
       streaming: true,
@@ -628,7 +628,8 @@ export const usePreparation = create<PreparationState>((set, get) => ({
     try {
       if (connection.live) {
         const turns = turnsToSend
-          .filter((message) => message.role === 'user' || message.status === 'completed')
+          .filter((message) => message.role === 'user' ||
+            (message.status === 'completed' && message.googleSearchGroundedAt === undefined))
           .map((message) => ({
             role: message.role,
             content:
@@ -703,6 +704,10 @@ export const usePreparation = create<PreparationState>((set, get) => ({
                     ? {
                         ...message,
                         content: (event.replace ? '' : message.content) + event.text,
+                        ...(event.replace ? {
+                          googleSearchSuggestions: undefined,
+                          googleSearchGroundedAt: selected.provider?.id === 'gemini' && options.webSearch ? Date.now() : undefined,
+                        } : {}),
                         activity: { phase: 'writing' as const },
                       }
                     : message,
@@ -726,6 +731,14 @@ export const usePreparation = create<PreparationState>((set, get) => ({
                     : message,
                 ),
               }));
+            if (event.type === 'google-search-suggestions')
+              update((state) => ({
+                messages: state.messages.map((message) => message.id === id ? {
+                  ...message,
+                  googleSearchSuggestions: event.html || undefined,
+                  googleSearchGroundedAt: event.html ? (message.googleSearchGroundedAt ?? Date.now()) : undefined,
+                } : message),
+              }));
             if (event.type === 'sources')
               update((state) => ({
                 messages: state.messages.map((message) =>
@@ -743,7 +756,9 @@ export const usePreparation = create<PreparationState>((set, get) => ({
         );
         current.signal.throwIfAborted();
         update((state) => ({
-          error: result.warning ?? null,
+          error: result.warning?.split('\n')
+            .filter((warning) => warning !== 'Google 搜索额度已用完，本次未联网回答。')
+            .join('\n') || null,
           messages: state.messages.map((message) =>
             message.id === id
               ? {
@@ -758,6 +773,8 @@ export const usePreparation = create<PreparationState>((set, get) => ({
                   reasoningSummary: result.reasoningSummary ?? message.reasoningSummary,
                   activities: result.activities ?? message.activities,
                   sources: result.sources,
+                  googleSearchSuggestions: result.googleSearchSuggestions,
+                  googleSearchGroundedAt: result.googleSearchSuggestions ? (message.googleSearchGroundedAt ?? Date.now()) : undefined,
                   usage: result.usage,
                   status: 'completed',
                 }
@@ -811,6 +828,10 @@ export const usePreparation = create<PreparationState>((set, get) => ({
                   ? { profilePreview: partial.profilePreview }
                   : {}),
                 ...(partial?.sources !== undefined ? { sources: partial.sources } : {}),
+                ...(partial?.googleSearchSuggestions !== undefined ? {
+                  googleSearchSuggestions: partial.googleSearchSuggestions || undefined,
+                  googleSearchGroundedAt: partial.googleSearchSuggestions ? (message.googleSearchGroundedAt ?? Date.now()) : undefined,
+                } : {}),
                 ...(partial?.activities !== undefined ? { activities: partial.activities } : {}),
                 ...(partial?.activity !== undefined ? { activity: partial.activity } : {}),
                 ...(discardPartial ? {
@@ -819,6 +840,8 @@ export const usePreparation = create<PreparationState>((set, get) => ({
                   profilePreview: undefined,
                   profileGeneration: undefined,
                   sources: undefined,
+                  googleSearchSuggestions: undefined,
+                  googleSearchGroundedAt: undefined,
                 } : {}),
                 status: stopped ? 'stopped' : 'failed',
                 error: messageError,
@@ -873,18 +896,6 @@ export const usePreparation = create<PreparationState>((set, get) => ({
       error: null,
     }));
     if (get().chatsReady) saveQueuedChats();
-  },
-  async removeResume() {
-    const doc = get().resume;
-    if (!doc) return false;
-    try {
-      await localKnowledge.deleteDocument(doc.id);
-      set({ resume: null, error: null });
-      return true;
-    } catch {
-      set({ error: '移除简历失败，请重试。' });
-      return false;
-    }
   },
 }));
 function stopRequests(ids: string[]) {

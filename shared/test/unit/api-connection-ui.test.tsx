@@ -61,9 +61,7 @@ it('uses the settings logo for recorded answers from supported API providers', (
 
 it.each([
   ['anthropic', 'Claude API', 'Anthropic'],
-  ['gemini', 'Gemini API', 'Google'],
   ['qwen', '通义千问', '千问AI平台'],
-  ['kimi', 'Kimi', 'Moonshot AI'],
   ['glm', '智谱 GLM', '智谱 AI'],
   ['doubao', '豆包', '火山方舟'],
 ])('shows a retired %s answer as an unknown model with no connection controls', (id, name, dataRecipient) => {
@@ -100,6 +98,14 @@ it('groups the saved key, usage and links beneath the service header with a sepa
   expect(html).not.toContain('<dt>本机请求</dt>');
   expect(html).not.toContain('role="progressbar"');
   expect(html).not.toMatch(/<input\b/);
+});
+
+it.each([
+  ['13.35523', '13.36'], ['8', '8.00'], ['0', '0.00'], ['-0.005', '-0.01'],
+  ['99999999999999999999.995', '100000000000000000000.00'],
+])('shows the reported balance %s rounded to two decimal places', (total, expected) => {
+  const html = renderToStaticMarkup(<ApiUsageValues balance={[{ currency: 'CNY', total }]} />);
+  expect(html).toContain(`>${expected} CNY</span>`);
 });
 
 it('shows the three local counters individually and adds a fourth metric only for a reported balance', () => {
@@ -146,7 +152,8 @@ it.each([
 });
 
 it.each([
-  ['openai', 'OpenAI API key'], ['deepseek', 'DeepSeek API key'],
+  ['openai', 'OpenAI API key'], ['deepseek', 'DeepSeek API key'], ['kimi', 'Kimi API key'],
+  ['gemini', 'Gemini API key'],
 ] as const)('labels the English secure field with the service name for %s', (provider, label) => {
   useGeneralSettings.setState({ language: 'en' });
   const html = renderToStaticMarkup(<ApiKeyDialog config={{ provider }} onFinish={vi.fn()} />);

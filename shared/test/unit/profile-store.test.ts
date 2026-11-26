@@ -14,6 +14,93 @@ vi.mock('../../../shared/src/services/chat', async (importOriginal) => ({
 }));
 const base = { name: '旧姓名', role: '旧岗位', jobDescription: '旧 JD', background: '已有背景' };
 
+it.each([
+  ['Google 搜索额度已用完，本次未联网回答。', null],
+  ['Google 搜索额度已用完，本次未联网回答。\n知识库暂不可用，本次回答未使用知识库资料。',
+    '知识库暂不可用，本次回答未使用知识库资料。'],
+  ['所选模型不支持联网搜索，本次未联网回答。', '所选模型不支持联网搜索，本次未联网回答。'],
+] as const)('keeps the completed answer while displaying only applicable response notices for %s', async (warning, notice) => {
+  usePreparation.setState({ chatsReady: false });
+  const result = { ok: true as const, usage: null, sources: [], answerText: '普通回答正文', warning };
+  vi.mocked(streamChat).mockResolvedValueOnce(result);
+  await usePreparation.getState().send('合成准备问题');
+  expect(usePreparation.getState().error).toBe(notice);
+  expect(usePreparation.getState().messages.at(-1)).toMatchObject({
+    status: 'completed', content: '普通回答正文', sources: [],
+  });
+  expect(result.warning).toBe(warning);
+});
+
+it.each(['gemini', 'openai'])('excludes an earlier Google grounded answer from later %s requests while preserving user turns and ordinary history', async provider => {
+  usePreparation.setState({ chatsReady: false });
+  vi.mocked(streamChat).mockResolvedValueOnce({ ok: true, usage: null, sources: [], answerText: '普通历史回答' });
+  await usePreparation.getState().send('普通历史问题');
+  const gemini = { id: 'gemini-4-hydrogen', label: 'Gemini', description: '',
+    provider: { id: 'gemini', name: 'Gemini API', dataRecipient: 'Google' } };
+  useChatConnection.setState({ models: [gemini] });
+  usePreparation.setState({ modelId: gemini.id });
+  vi.mocked(streamChat).mockResolvedValueOnce({ ok: true, usage: null, sources: [],
+    answerText: '本轮 Google 搜索回答', googleSearchSuggestions: '<div>Google suggestion</div>' });
+  await usePreparation.getState().send('请搜索公开资料');
+  const grounded = usePreparation.getState().messages.at(-1)!;
+  expect(grounded.googleSearchGroundedAt).toEqual(expect.any(Number));
+  const next = { id: 'next-model', label: 'Next', description: '',
+    provider: { id: provider, name: provider, dataRecipient: provider } };
+  useChatConnection.setState({ models: [next] });
+  usePreparation.setState({ modelId: next.id });
+  vi.mocked(streamChat).mockImplementationOnce(async request => {
+    expect(request.turns.filter(turn => turn.role === 'user').map(turn => turn.content))
+      .toEqual(['普通历史问题', '请搜索公开资料', '继续讨论']);
+    expect(request.turns.filter(turn => turn.role === 'assistant').map(turn => turn.content)).toEqual(['普通历史回答']);
+    return { ok: true, usage: null, sources: [], answerText: '后续普通回答' };
+  });
+  await usePreparation.getState().send('继续讨论');
+  expect(usePreparation.getState().messages.find(message => message.id === grounded.id)?.content).toBe('本轮 Google 搜索回答');
+});
+
+it.each(['replace', 'discard'] as const)('clears Google suggestion markup when an answer is %s', async operation => {
+  usePreparation.setState({ chatsReady: false });
+  vi.mocked(streamChat).mockImplementationOnce(async (request, emit) => {
+    emit({ id: request.id, type: 'delta', text: '待处理回答' });
+    emit({ id: request.id, type: 'google-search-suggestions', html: '<div>旧搜索建议</div>' });
+    expect(usePreparation.getState().messages.at(-1)?.googleSearchSuggestions).toBe('<div>旧搜索建议</div>');
+    if (operation === 'discard') throw new ChatRequestError({
+      code: 'content_filter', message: '模型服务拒绝了这次请求。', discardPartial: true,
+    });
+    emit({ id: request.id, type: 'delta', text: '替换后的普通回答', replace: true });
+    expect(usePreparation.getState().messages.at(-1)?.googleSearchSuggestions).toBeUndefined();
+    return { ok: true, usage: null, sources: [], answerText: '替换后的普通回答' };
+  });
+  await usePreparation.getState().send('合成问题');
+  const reply = usePreparation.getState().messages.at(-1)!;
+  expect(reply.googleSearchSuggestions).toBeUndefined();
+  expect(reply.googleSearchGroundedAt).toBeUndefined();
+  expect(reply.content).toBe(operation === 'discard' ? '' : '替换后的普通回答');
+});
+
+it('ignores Google suggestion events received after a request has stopped', async () => {
+  usePreparation.setState({ chatsReady: false });
+  const ready = Promise.withResolvers<void>();
+  let late!: Parameters<typeof streamChat>[1];
+  vi.mocked(streamChat).mockImplementationOnce(async (request, emit, signal) => {
+    late = event => emit({ ...event, id: request.id });
+    emit({ id: request.id, type: 'delta', text: '已显示回答' });
+    emit({ id: request.id, type: 'google-search-suggestions', html: '<div>匹配当前回答</div>' });
+    ready.resolve();
+    await new Promise<void>((_, reject) => signal.addEventListener('abort',
+      () => reject(new DOMException('stopped', 'AbortError')), { once: true }));
+    return { ok: true, usage: null, sources: [] };
+  });
+  const sending = usePreparation.getState().send('合成公开问题');
+  await ready.promise;
+  usePreparation.getState().stop();
+  await sending;
+  late({ id: 'late', type: 'google-search-suggestions', html: '<div>迟到的其他建议</div>' });
+  expect(usePreparation.getState().messages.at(-1)).toMatchObject({
+    status: 'stopped', googleSearchSuggestions: '<div>匹配当前回答</div>', content: '已显示回答',
+  });
+});
+
 it('shows replacement text and a growing proposal before recovery completes without saving it', async () => {
   const pending = Promise.withResolvers<Extract<Awaited<ReturnType<typeof streamChat>>, { ok: true }>>();
   const started = Promise.withResolvers<void>();

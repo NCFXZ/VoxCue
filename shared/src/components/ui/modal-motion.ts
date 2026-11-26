@@ -23,7 +23,7 @@ export function captureModalExit(dialog: HTMLDialogElement) {
   const rect = dialog.getBoundingClientRect();
   if (!rect.width || !rect.height) return;
   const style = getComputedStyle(dialog);
-  const value = style.getPropertyValue('--panel-motion-duration').trim() || '240ms';
+  const value = style.getPropertyValue('--panel-motion-exit-duration').trim() || '180ms';
   const duration = parseFloat(value) * (value.endsWith('ms') ? 1 : 1000);
   if (!Number.isFinite(duration) || duration <= 0) return;
 

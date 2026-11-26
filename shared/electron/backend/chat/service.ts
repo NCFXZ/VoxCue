@@ -47,6 +47,13 @@ interface Dependencies {
   fetch?: typeof fetch;
   accountUsage?: ChatGPTAccountUsage;
   provider?: ModelProvider;
+  apiKeyEndpoint?: {
+    base: string;
+    webSearchInstructions: string;
+    models(payload: unknown, provider: ModelProvider): OpenAIModel[];
+    /** Long-reasoning providers regenerate visibly instead of within the short buffered window. */
+    profileRecovery?: 'preview';
+  };
   failure?: typeof apiError;
 }
 export class ChatGPTService implements AIChatService {
@@ -65,7 +72,7 @@ export class ChatGPTService implements AIChatService {
     const managed = access.kind === 'codex';
     if (!managed && access.kind !== 'api-key')
       throw new Error('OpenAI 授权类型无效，请重新连接模型服务。');
-    const base = managed ? managedBase : apiBase;
+    const base = managed ? managedBase : this.dependencies.apiKeyEndpoint?.base ?? apiBase;
     const catalogURL = new URL(`${base}/models`);
     // Report the same native runtime version used for login and quota.
     if (managed) catalogURL.searchParams.set('client_version', access.runtimeVersion);
@@ -121,7 +128,10 @@ export class ChatGPTService implements AIChatService {
       const latest = await abortable(this.dependencies.access(), deadline);
       if (latest.kind !== kind || latest.account !== account)
         throw new Error('账户已变更，请重新刷新模型列表。');
-      return openAIModels(payload, latest, this.dependencies.provider);
+      const { apiKeyEndpoint, provider = chatGPTProvider } = this.dependencies;
+      return kind === 'api-key' && apiKeyEndpoint
+        ? apiKeyEndpoint.models(payload, provider)
+        : openAIModels(payload, latest, provider);
     });
   }
   async resetUsage() {
@@ -138,9 +148,10 @@ export class ChatGPTService implements AIChatService {
   async stream(value: unknown, emit: (event: ChatEvent) => void, signal: AbortSignal) {
     const scope = this.catalog.signal(signal);
     try {
-      if (this.dependencies.provider?.id === 'openai')
+      if (this.dependencies.provider)
         return await recoverApiProfileOutput(validateRequest(value), emit, scope,
-          (request, publish, attemptSignal) => this.run(request, publish, attemptSignal));
+          (request, publish, attemptSignal) => this.run(request, publish, attemptSignal),
+          this.dependencies.apiKeyEndpoint?.profileRecovery);
       return await this.run(value, emit, scope);
     } catch (error) {
       if (!scope.aborted && invalidatesModelCatalog(error)) this.catalog.expire();
@@ -159,6 +170,9 @@ export class ChatGPTService implements AIChatService {
     if (request.effort && !model.reasoningEfforts?.includes(request.effort))
       throw new Error('所选模型不支持该思考强度，请选择自动或刷新模型列表。');
     const { input, attachments } = prepareResponseInput(request);
+    if (model.fileInput === false && input.some(turn =>
+      Array.isArray(turn.content) && turn.content.some(part => part.type === 'input_file')))
+      throw Error('该 API 连接支持文本和所选模型可读取的图片，请将文档转换成纯文本再发送。');
     if (
       model.imageInput === false &&
       input.some(
@@ -198,6 +212,7 @@ export class ChatGPTService implements AIChatService {
       const json = JSON.stringify({
         model: request.modelId,
         instructions: request.instructions + profileContext(request) +
+          (webSearch ? this.dependencies.apiKeyEndpoint?.webSearchInstructions ?? '' : '') +
           (request.webSearch && !webSearch ? noWebSearchInstructions : '') +
           (request.profile && !model.nativeProfileFormat ? profileSchemaInstructions : ''),
         input,
@@ -301,7 +316,7 @@ export class ChatGPTService implements AIChatService {
       let outputLength = 0;
       let answerText = '';
       const streamedText = new ResponseText();
-      const apiProfile = this.dependencies.provider?.id === 'openai';
+      const apiProfile = !!this.dependencies.provider;
       let profileStream = request.profile ? new ProfileAnswerStream(apiProfile) : undefined;
       using previews = profileStream && new ProfilePreviews(request.id, emit, deadline);
       let refused = false;

@@ -2,6 +2,7 @@ import { setImmediate as yieldToIO } from 'node:timers/promises';
 import type { ChatFile, ChatRequest } from '../../contracts/chat';
 
 export const noWebSearchInstructions = '\n本次请求未提供联网检索工具。需要实时资料时请如实说明。';
+export const publicWebSearchInstructions = '\n需要最新资料或核验时，使用联网搜索查找公开信息，并引用本轮实际检索到的来源。搜索词和网址不得包含个人资料、私人附件或知识库内容。';
 
 const mimeTypes: Record<string, string> = {
   pdf: 'application/pdf',

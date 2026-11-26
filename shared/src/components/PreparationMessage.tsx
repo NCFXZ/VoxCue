@@ -60,7 +60,7 @@ export const PreparationMessage = memo(function PreparationMessage({
             />
           </div>
           <ResponseProgress message={message} />
-          <ChatSources sources={message.sources ?? []} />
+          <ChatSources sources={message.sources ?? []} googleSearchSuggestions={message.googleSearchSuggestions} />
           <div className="chat-answer">
             {message.content && (
               <MarkdownContent

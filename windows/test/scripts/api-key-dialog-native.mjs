@@ -13,8 +13,11 @@ import { probe, stableTarget } from './window-probe.mjs';
 assert.equal(process.platform, 'win32');
 const options = process.argv.slice(2);
 const zoomOption = options.find(value => /^--zoom=(1|1\.25|1\.5|1\.75|2)$/.test(value));
+const providerOption = options.find(value => /^--provider=(openai|kimi|gemini)$/.test(value));
+const providerId = providerOption?.slice('--provider='.length) ?? 'openai';
+const providerName = { openai: 'OpenAI API', kimi: 'Kimi', gemini: 'Gemini API' }[providerId];
 const deliver = options.includes('--export-masked');
-assert.ok(options.every(value => value === zoomOption || value === '--export-masked'), 'Use --zoom=1|1.25|1.5|1.75|2 and optionally --export-masked');
+assert.ok(options.every(value => value === zoomOption || value === providerOption || value === '--export-masked'), 'Use --zoom=1|1.25|1.5|1.75|2, --provider=openai|kimi|gemini or --export-masked');
 const zooms = zoomOption ? [Number(zoomOption.slice(7))] : [1, 1.25];
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const privateImage = path.join(testRoot, 'api-key-dialog-masked.png');
@@ -43,11 +46,12 @@ Object.assign(load('backend/copilot/auth').CopilotAuthService.prototype,{
 });
 Object.assign(load('backend/copilot/runtime').CopilotRuntime.prototype,{control:unavailable,client:unavailable});
 const {ApiCredentialStore}=load('backend/api/credentials');
+const testProvider=${JSON.stringify(providerId)};
 let saved=false;globalThis.nativeKeySaves=0;
 Object.assign(ApiCredentialStore.prototype,{
-  async list(){return saved?[{provider:'openai'}]:[];},async read(){return null;},
+  async list(){return saved?[{provider:testProvider}]:[];},async read(){return null;},
   async save(provider,credential){
-    if(provider!=='openai' || credential.key!=='Wivi8g')throw Error('Synthetic key did not round-trip');
+    if(provider!==testProvider || credential.key!=='Wivi8g')throw Error('Synthetic key did not round-trip');
     saved=true;globalThis.nativeKeySaves++;
   },async remove(){saved=false;},async dispose(){}
 });
@@ -65,8 +69,8 @@ function owner(){
 }
 ipc.registerApiConnectionIpc=ports=>register({...ports,
   prompt(provider,signal,field,tab){
-    if(provider!=='openai')throw Error('Unexpected synthetic provider');
-    return keyPorts.promptApiKey(owner(),'OpenAI API','zh-CN',signal,field,tab);
+    if(provider!==testProvider)throw Error('Unexpected synthetic provider');
+    return keyPorts.promptApiKey(owner(),${JSON.stringify(providerName)},'zh-CN',signal,field,tab);
   },
   control(command){return keyPorts.controlApiKey(owner(),command);}
 });
@@ -141,16 +145,38 @@ try {
       await page.getByRole('menuitemradio',{name:theme==='light'?'浅色':'深色',exact:true}).click();
       await button(nav,'AI 服务').click();
       await settings.getByRole('radio',{name:'API 密钥',exact:true}).click();
-      const service=settings.getByRole('group',{name:'OpenAI API',exact:true});
+      const service=settings.getByRole('group',{name:providerName,exact:true});
       if(saves) {
         await service.getByRole('button',{name:/^移除密钥/}).click();
         await service.getByRole('button',{name:/^确认/}).click();
       }
       await focusUiWindow(app,page);
+      const holdEntry = zoom === zooms[0];
+      await page.emulateMedia({ reducedMotion: holdEntry ? 'no-preference' : 'reduce' });
+      const paused = holdEntry && await page.addStyleTag({ content:
+        '.api-key-dialog[open] { animation-play-state: paused; animation-delay: -100ms; }',
+      });
       await physicalClick(button(service,'添加密钥'));
       await prompt.waitFor();
       const slot=prompt.locator('[data-api-key-field]');
       assert.equal(await slot.locator('input,textarea,[contenteditable=true]').count(),0);
+      if (paused) {
+        const opacity = await prompt.evaluate(async dialog => {
+          await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+          return Number(getComputedStyle(dialog).opacity);
+        });
+        assert.ok(opacity > 0 && opacity < 1, 'The dialog is partway through its opening fade');
+        assert.ok(await button(prompt,'验证并保存').isDisabled(), 'The native input must wait for the dialog fade');
+        assert.ok(!await app.evaluate(() => globalThis.nativeKeyHelper), 'No opaque native field over the fading dialog');
+        if (theme === 'light') {
+          await button(prompt,'取消').click();
+          await prompt.waitFor({state:'hidden'});
+          await physicalClick(button(service,'添加密钥'));
+          await prompt.waitFor();
+          assert.ok(!await app.evaluate(() => globalThis.nativeKeyHelper), 'Cancelling the fade discards the pending editor');
+        }
+        await paused.evaluate(node => node.remove());
+      }
       const pid=await helperPid();
       async function native(op, output) {
         const p=await stableTarget(prompt,projection);
@@ -177,7 +203,7 @@ try {
       await prompt.waitFor({state:'hidden'});
       assert.equal(await app.evaluate(()=>globalThis.nativeKeySaves),++saves,'Exact synthetic input reaches the isolated main-process store');
       const dpr=await page.evaluate(()=>devicePixelRatio);
-      console.log('PASS native Electron key dialog', {theme,zoom,dpr});
+      console.log('PASS native Electron key dialog', {provider:providerName,theme,zoom,dpr});
     }
   }
   await win.dispose();

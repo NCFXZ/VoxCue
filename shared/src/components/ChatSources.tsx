@@ -4,10 +4,14 @@ import { useState } from 'react';
 import type { ChatSource } from '../../electron/contracts/chat';
 import { ChevronRight } from './icons';
 import { SourceLink } from './SourceLink';
+import { GoogleSearchSuggestions } from './GoogleSearchSuggestions';
 
-export function ChatSources({ sources }: { sources: ChatSource[] }) {
+export function ChatSources({ sources, googleSearchSuggestions }: {
+  sources: ChatSource[];
+  googleSearchSuggestions?: string;
+}) {
   const [error, setError] = useState(false);
-  if (!sources.length) return null;
+  if (!sources.length && !googleSearchSuggestions) return null;
   const links = (items: ChatSource[]) =>
     items.map((source) => (
       <SourceLink
@@ -20,10 +24,13 @@ export function ChatSources({ sources }: { sources: ChatSource[] }) {
     ));
   return (
     <div className="chat-source-group" aria-label={t('搜索来源')}>
-      <div className="chat-sources">
-        <span>{t('来源')}</span>
-        {links(sources.slice(0, 3))}
-      </div>
+      {googleSearchSuggestions && <GoogleSearchSuggestions html={googleSearchSuggestions} />}
+      {sources.length > 0 && (
+        <div className="chat-sources">
+          <span>{t('来源')}</span>
+          {links(sources.slice(0, 3))}
+        </div>
+      )}
       {sources.length > 3 && (
         <details className="chat-source-more">
           <summary>

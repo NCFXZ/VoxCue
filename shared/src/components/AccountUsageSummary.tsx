@@ -2,7 +2,7 @@ import type { AccountUsage } from '../../electron/contracts/accountUsage';
 import { apiProviders, type ApiBalance, type ApiProvider } from '../../electron/contracts/apiConnections';
 import { Fragment } from 'react';
 import { t } from '../i18n';
-import { accountUsageSummaryParts } from '../services/accountUsageSummary';
+import { accountUsageSummaryParts, formatApiBalance } from '../services/accountUsageSummary';
 
 export function InterviewApiBillingRow({
   provider,
@@ -15,14 +15,13 @@ export function InterviewApiBillingRow({
   let label = t('API计费');
   if (balances?.length) {
     const nonzero = balances.filter(({ total }) => Number(total) !== 0);
-    const amount = (nonzero.length ? nonzero : balances)
-      .map(({ currency, total }) => `${total} ${currency}`).join(' · ');
+    const amount = (nonzero.length ? nonzero : balances).map(formatApiBalance).join(' · ');
     label = t('剩余 {0}', [amount]);
   }
   return (
     <div>
       <dt>{name}</dt>
-      <dd aria-live={provider === 'deepseek' ? 'polite' : undefined}>{label}</dd>
+      <dd aria-live={apiProviders[provider].balance ? 'polite' : undefined}>{label}</dd>
     </div>
   );
 }

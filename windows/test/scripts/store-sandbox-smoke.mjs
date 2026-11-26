@@ -35,6 +35,7 @@ const appxBaselines = new Map([
   ['--appx-upgrade-1.3.0', ['1.3.0', '4ff42cba5792d3460e9369614002361661f9410419992b9dffcb5d1ddfea5792', 'store']],
   ['--appx-upgrade-1.3.2', ['1.3.2', '04b68c2d9d57eb10599be86f824be72e35deee58ff340b0b80e9e550488b7f9b', 'store']],
   ['--appx-upgrade-1.3.3', ['1.3.3', '1231283f74d14bd10ccf2426de73c5408884239c2459bd40b30ae712d906f48e', 'store']],
+  ['--appx-upgrade-1.3.5', ['1.3.5', '4a46b3835ed5d8e78295e8e2c593e0b69ffe6ce9e4e5b4b2439dfc37e9c8949e', 'store']],
 ]);
 const appxUpgrade = appxBaselines.has(argument);
 // Published, immutable originals used before installing the current package.
@@ -46,6 +47,7 @@ const previousVersions = new Map([
   ['--nsis-upgrade-1.3.0', ['1.3.0', '4c1666dcc3488d58df75f69dc4a9686851564194b7dbe1271e6921c66fb1e36d', 'installer']],
   ['--nsis-upgrade-1.3.2', ['1.3.2', '7dd66772bc6af35eedae829a15155f86faa55459499cb4db477723629b4389ad', 'installer']],
   ['--nsis-upgrade-1.3.3', ['1.3.3', 'b8503f4e89bdf953480c9eb80f7b86e9a48dac970ec88922013a525e36db1874', 'installer']],
+  ['--nsis-upgrade-1.3.5', ['1.3.5', '0e7aaf35faaa9d8c13c719d5e64828836a2c23f32d0583ae2f4c604f1ece8049', 'installer']],
 ]);
 const nsisTask =
   argument === '--nsis-current' ? 'nsis-current'
@@ -81,7 +83,7 @@ const artifact = copilotVault
       : path.join(platformRoot, 'release/store', `VoxCue-Store-${version}-x64.appx`);
 const [previousVersion, previousDigest, previousDirectory = previousVersion] =
   appxBaselines.get(argument) ?? previousVersions.get(argument) ?? [];
-const checkCachedOffer = Boolean(nsisTask) && ['1.2.2', '1.2.3', '1.3.0', '1.3.3'].includes(previousVersion);
+const checkCachedOffer = Boolean(nsisTask) && ['1.2.2', '1.2.3', '1.3.0', '1.3.3', '1.3.5'].includes(previousVersion);
 const checkRagUpgrade = checkCachedOffer || previousVersion === '1.2.0';
 let previousArtifact;
 if (previousVersion) {
@@ -407,7 +409,7 @@ function Check-ApiKeyPaste($directory) {
   $result.apiKeyPaste = $true
 }
 function Install-UpgradeRag($profileMarker) {
-  if ($config.ragDirectory -cnotmatch '^rag-1\.0\.0-[a-f0-9]{64}$' -or $config.previous.version -notin @('1.2.0','1.2.2','1.2.3','1.3.0','1.3.2','1.3.3')) { throw 'Unexpected upgrade component' }
+  if ($config.ragDirectory -cnotmatch '^rag-1\.0\.0-[a-f0-9]{64}$' -or $config.previous.version -notin @('1.2.0','1.2.2','1.2.3','1.3.0','1.3.2','1.3.3','1.3.5')) { throw 'Unexpected upgrade component' }
   $cache = Join-Path ([IO.Path]::GetDirectoryName($profileMarker)) 'component-cache'
   Assert-GuestProfilePath $cache
   if (Test-Path -LiteralPath $cache) { throw 'Upgrade fixture requires a fresh component cache' }
@@ -421,7 +423,7 @@ function Test-IndexRebuild($targetVersion) {
     ($sourceVersion -lt [version]'1.3.5' -and $target -ge [version]'1.3.5')
 }
 function Assert-UpgradeIndexLayout($profileMarker, $installedVersion) {
-  if ($config.previous.version -cne '1.3.3' -or [version]$config.version -lt [version]'1.3.5') { return }
+  if ($config.previous.version -notin @('1.3.3','1.3.5') -or [version]$config.version -lt [version]'1.3.5') { return }
   $root = [IO.Path]::GetDirectoryName($profileMarker)
   $account = Join-Path (Join-Path $root 'account-profiles') '${createHash('sha256').update('local').digest('hex')}'
   $knowledge = Join-Path $account 'knowledge-v1'
@@ -431,7 +433,7 @@ function Assert-UpgradeIndexLayout($profileMarker, $installedVersion) {
   $ownerFile = Join-Path $library 'owner.json'
   $libraryCatalog = Join-Path $library 'catalog.json'
   foreach ($file in @($legacyCatalog, $layout, $ownerFile, $libraryCatalog)) { Assert-GuestProfilePath $file }
-  if ($installedVersion -ceq $config.previous.version) {
+  if ($config.previous.version -ceq '1.3.3' -and $installedVersion -ceq $config.previous.version) {
     if (-not (Test-Path -LiteralPath $legacyCatalog -PathType Leaf) -or (Test-Path -LiteralPath $layout)) {
       throw 'The original installer did not create the shared knowledge index'
     }

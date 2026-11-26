@@ -2,7 +2,7 @@
 
 Mac 正式包动态测试必须使用 `macos/test/scripts/package-guest-smoke.mjs`（`pnpm test:package`），固定工具、镜像、显式输入、SIP／Gatekeeper 和收尾门禁见 [Mac guest 准备](../../macos/docs/TEST_GUEST.md)。Owner 仅可运行 `package-smoke.mjs --static-only` 的零产品启动静态检查，退出 2 表示动态覆盖待执行。旧 `package-temporary-smoke.mjs`、AEC `--packaged` 和产品 `--online` 调试探针已退役；下文历史命令不覆盖此边界。功能、五档缩放与 Qwen 开发态入口保持串行 GUI／原生／推理规则，最终 ASAR 覆盖另外在 guest 执行。
 
-当前范围见根 `PROGRESS.md`，Windows 1.2.3 范围见[实施与发行说明](../docs/WINDOWS_1.2.3_RELEASE.md)。客户端集成须以 `VOXCUE_TEST_SERVER_ROOT` 指向干净的服务端 0.5.3／`3bceb615dbba900f669322c301fc4b5b473dfb15` 参考。另以同一变量指定 0.6.1 参考，在 Windows 目录运行 `node ../shared/test/scripts/account-erasure-receipt-smoke.mjs`，覆盖来源账号无会话验密及注销回执。两套参考均使用临时合成资料与回环服务。UI 矩阵导出截图须位于 `os.tmpdir()` 内的自有目录，普通回归不导出图片。
+当前范围见根 `PROGRESS.md`，Windows 1.2.3 范围见[实施与发行说明](../docs/WINDOWS_1.2.3_RELEASE.md)。客户端集成须以 `VOXCUE_TEST_SERVER_ROOT` 指向干净的服务端 0.5.3／`3bceb615dbba900f669322c301fc4b5b473dfb15` 参考。另以同一变量指定干净的 0.6.1／`3440a2517ad3e4d2ee486c76023d229a0ec17fa8` 参考，在 Windows 目录运行 `node ../shared/test/scripts/account-erasure-receipt-smoke.mjs`，覆盖来源账号无会话验密及注销回执。两套入口均校验固定 HEAD 和受控文件无修改，使用临时合成资料与回环服务。UI 矩阵导出截图须位于 `os.tmpdir()` 内的自有目录，普通回归不导出图片。
 
 宿主 Node 须符合固定服务端参考的 `>=24.19.0 <25` 要求；本轮固定使用 Node 24.22.1，与固定 Electron 44.10.0 内的 Node 版本一致，避免旧宿主 `TextDecoder` 的 Windows-1252 解码差异。此要求仅用于开发和测试环境，不改变应用依赖或解码策略。
 

@@ -1,4 +1,5 @@
 const { randomUUID } = require('node:crypto');
+const { readFileSync } = require('node:fs');
 const path = require('node:path');
 
 // Representative public model records in each vendor's wire format. The
@@ -16,8 +17,25 @@ const deepseek = {
     output_modalities: ['text'],
   })),
 };
-const catalogs = { openai, deepseek };
+const kimi = { data: ['kimi-k3.1-pro', 'kimi-k3'].map(id => ({
+  object: 'model', id, supports_reasoning: true, supports_image_in: true,
+})) };
+const gemini = { models: ['gemini-4-hydrogen', 'gemini-2.5-flash'].map(id => ({
+  name: 'models/' + id, displayName: id === 'gemini-4-hydrogen' ? 'Gemini 4 Hydrogen' : 'Gemini 2.5 Flash',
+  supportedGenerationMethods: ['generateContent'], thinking: true,
+})) };
+const catalogs = { openai, deepseek, kimi, gemini };
 const usage = { prompt_tokens: 48, completion_tokens: 24, total_tokens: 72 };
+const googleSearchHtml = readFileSync(path.join(__dirname, 'google-search-suggestions.html'), 'utf8');
+const [, googleSearchLink, googleSearchLabel] =
+  googleSearchHtml.match(/<a class="chip" href="([^"]+)">([^<]+)<\/a>/u) ?? [];
+if (!googleSearchLink || !googleSearchLabel) throw Error('The official Google fixture must include a search chip.');
+const googleSearch = {
+  source: { title: 'Synthetic Google grounding', url: 'https://example.org/google-grounding' },
+  link: googleSearchLink,
+  label: googleSearchLabel,
+  html: googleSearchHtml,
+};
 const profilePreview = {
   request: '请将简历摘要改成一段用于合成流式验证的内容。',
   prefix: '这是一段用于流式验证的合成简历。',
@@ -47,6 +65,8 @@ const proposal = (answer, changes) =>
 const routes = {
   openai: ['api.openai.com', '/v1/models', '/v1/responses'],
   deepseek: ['api.deepseek.com', '/models', '/chat/completions', '/user/balance'],
+  kimi: ['api.moonshot.cn', '/v1/models', '/v1/responses', '/v1/users/me/balance'],
+  gemini: ['generativelanguage.googleapis.com', '/v1beta/models'],
 };
 
 function transport(provider, key = 'preview-only') {
@@ -60,9 +80,54 @@ function transport(provider, key = 'preview-only') {
         url.hostname !== host)
       throw Error('模拟请求的服务地址与所选厂商不符。');
     const headers = new Headers(options.headers);
-    if (headers.get('authorization') !== 'Bearer ' + key)
+    if ((provider === 'gemini' ? headers.get('x-goog-api-key') : headers.get('authorization')) !==
+        (provider === 'gemini' ? key : 'Bearer ' + key))
       throw Error('模拟请求未使用所选厂商的鉴权方式。');
     if (method === 'GET' && url.pathname === models) return Response.json(catalogs[provider]);
+    if (provider === 'gemini') {
+      const match = url.pathname.match(/^\/v1beta\/models\/([a-z0-9.-]+):streamGenerateContent$/);
+      const body = JSON.parse(options.body instanceof Blob ? await options.body.text() : options.body);
+      if (method !== 'POST' || !match || url.searchParams.get('alt') !== 'sse' ||
+          !body.contents?.some(message => message.role === 'user'))
+        throw Error('模拟请求缺少 Gemini 流式对话字段。');
+      const thinking = body.generationConfig?.thinkingConfig;
+      const effort = thinking?.thinkingLevel ?? ({ 0: 'none', 1024: 'low', 8192: 'medium', 24576: 'high' }[thinking?.thinkingBudget]) ?? 'auto';
+      const answer = '当前模型为 ' + match[1] + '，思考设置为 ' + effort + '。这是模拟回答。';
+      const system = body.systemInstruction?.parts?.map(part => part.text ?? '').join('') ?? '';
+      const nativeProfile = body.generationConfig?.responseMimeType === 'application/json' &&
+        body.generationConfig.responseJsonSchema;
+      const text = nativeProfile || system.includes('JSON Schema') ? JSON.stringify({ answer, changes: {
+        name: null, language: null, background: null, jobDescription: null, customInstructions: null, skills: null,
+      }, skillScope: null }) : answer;
+      const chunks = text.match(/[\s\S]{1,8}/gu);
+      const responseId = 'gemini-' + randomUUID();
+      const events = chunks.map((delta, index) => ({
+        responseId, candidates: [{ index: 0, content: { role: 'model', parts: [{ text: delta }] },
+          ...(index === chunks.length - 1 ? { finishReason: 'STOP' } : {}),
+          ...(index === chunks.length - 1 && body.tools?.some(tool => tool.google_search) ? {
+            groundingMetadata: {
+              webSearchQueries: ['voxcue synthetic'],
+              groundingChunks: [{ web: { uri: googleSearch.source.url, title: googleSearch.source.title } }],
+              searchEntryPoint: { renderedContent: googleSearch.html },
+            },
+          } : {}),
+        }],
+        ...(index === chunks.length - 1 ? {
+          usageMetadata: { promptTokenCount: 48, candidatesTokenCount: 24, totalTokenCount: 72 },
+        } : {}),
+      }));
+      const encoder = new TextEncoder();
+      let index = 0;
+      return new Response(new ReadableStream({
+        async pull(controller) {
+          await require('node:timers/promises').setTimeout(36);
+          if (options.signal?.aborted || index >= events.length) return controller.close();
+          controller.enqueue(encoder.encode('data: ' + JSON.stringify(events[index++]) + '\n\n'));
+        },
+      }), { headers: { 'content-type': 'text/event-stream' } });
+    }
+    if (method === 'GET' && provider === 'kimi' && url.pathname === balance)
+      return Response.json({ code: 0, data: { available_balance: 12.5, voucher_balance: 2.5, cash_balance: 10 } });
     if (method === 'GET' && provider === 'deepseek' && url.pathname === balance)
       return Response.json({
         balance_infos: [
@@ -79,7 +144,7 @@ function transport(provider, key = 'preview-only') {
       throw Error('此操作未包含在离线预览中。');
     const body = JSON.parse(options.body);
     const model = body.model;
-    const responses = provider === 'openai' || deepSeekResponses;
+    const responses = provider === 'openai' || provider === 'kimi' || deepSeekResponses;
     const messages = responses ? body.input : body.messages;
     if (body.stream !== true || typeof model !== 'string' || !Array.isArray(messages) ||
         !messages.some(message => message.role === 'user') || headers.get('content-type') !== 'application/json')
@@ -96,7 +161,7 @@ function transport(provider, key = 'preview-only') {
       body.messages?.find((m) => m.role === 'system')?.content ??
       '';
     const format = responses ? body.text?.format?.type : body.response_format?.type;
-    const json = provider === 'openai' && (format === 'json_schema' || system.includes('JSON Schema'));
+    const json = !deepSeekResponses && responses && (format === 'json_schema' || system.includes('JSON Schema'));
     // DeepSeek preparation uses its text protocol: intent line, visible answer, optional proposal.
     const deepSeekProfile = provider === 'deepseek' && system.includes(intent('none'));
     if (deepSeekProfile && (format || body.response_format))
@@ -225,12 +290,13 @@ function install(root, profile) {
   const service = load('backend/api/service');
   const chat = service.createApiChatService,
     balance = service.readApiBalance;
-  // OpenAI API and the subscription share an implementation. The synthetic
-  // subscription installed later must not override this offline API transport.
-  const { models, stream, usage } = load('backend/chat/service').ChatGPTService.prototype;
+  // Keep API instances on the real Responses implementation when the subscription
+  // fixture subsequently replaces its prototype methods.
+  const { ChatGPTService } = load('backend/chat/service');
+  const { models, stream, usage } = ChatGPTService.prototype;
   service.createApiChatService = (provider, access, ledger) => {
     const instance = chat(provider, access, ledger, transport(provider));
-    return provider === 'openai' ? Object.assign(instance, { models, stream, usage }) : instance;
+    return instance instanceof ChatGPTService ? Object.assign(instance, { models, stream, usage }) : instance;
   };
   service.readApiBalance = (provider, secret, signal) =>
     balance(provider, secret, signal, transport(provider));
@@ -312,7 +378,8 @@ function install(root, profile) {
       },
     });
   };
-  shell.openExternal = async () => {
+  shell.openExternal = async url => {
+    if (url === googleSearch.link) { globalThis.previewGoogleLink = url; return; }
     throw Error('模拟预览已关闭外部链接。');
   };
   dialog.showOpenDialog = async () => ({ canceled: true, filePaths: [] });
@@ -339,4 +406,4 @@ function install(root, profile) {
   Object.assign(CopilotRuntime.prototype, { control: unavailable, client: unavailable });
 }
 
-module.exports = { install, profilePreview, deepSeekPreparation, transport };
+module.exports = { install, profilePreview, deepSeekPreparation, googleSearch, transport };

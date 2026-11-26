@@ -8,6 +8,7 @@ export type OpenAIAccess = { token: string; account: string } & (
 
 export interface OpenAIModel extends ChatModel {
   imageInput?: boolean;
+  fileInput?: boolean;
   reasoningSummary: boolean;
   nativeProfileFormat: boolean;
   webSearch?: boolean;
