@@ -147,6 +147,41 @@ export async function assertInitialDownloadProgress(button, start, { delayMs = 1
 export async function assertDownloadButton(page, button, { iconOnly = false, hoverLabel, app } = {}) {
   await page.bringToFront();
   const dark = await page.evaluate(() => document.documentElement.classList.contains('dark'));
+  const probe = await button.evaluateHandle(element => {
+    const events = [], start = performance.now();
+    const types = ['pointermove', 'pointerover', 'pointerout', 'focus', 'blur'];
+    const record = event => {
+      events.push({ type: event.type, at: performance.now() - start,
+        x: event.clientX, y: event.clientY,
+        ownTarget: event.target === element || (event.target instanceof Node && element.contains(event.target)),
+        hovered: element.matches(':hover'), focused: document.hasFocus(),
+        focusVisible: element.matches(':focus-visible') });
+      if (events.length > 40) events.shift();
+    };
+    for (const type of types) window.addEventListener(type, record, true);
+    return {
+      read() {
+        const style = node => {
+          if (!node) return null;
+          const value = getComputedStyle(node);
+          return { visibility: value.visibility, opacity: value.opacity,
+            transition: value.transition, transform: value.transform };
+        };
+        return { events, connected: element.isConnected, rect: element.getBoundingClientRect().toJSON(),
+          hovered: element.matches(':hover'), focused: document.hasFocus(),
+          focusVisible: element.matches(':focus-visible'), active: document.activeElement === element,
+          cancellable: element.classList.contains('is-cancellable'),
+          progress: style(element.querySelector('.download-button-progress')),
+          cancel: style(element.querySelector('.download-button-cancel')),
+          animations: element.getAnimations({ subtree: true }).map(animation => ({
+            state: animation.playState, currentTime: animation.currentTime, startTime: animation.startTime,
+            duration: animation.effect?.getTiming().duration,
+            property: animation.transitionProperty,
+          })) };
+      },
+      dispose() { for (const type of types) window.removeEventListener(type, record, true); },
+    };
+  });
   try {
     for (const theme of ['light', 'dark']) {
       await page.evaluate(
@@ -243,7 +278,26 @@ export async function assertDownloadButton(page, button, { iconOnly = false, hov
       assert.equal(await button.locator('.download-button-cancel').isVisible(), true);
       await button.evaluate((element) => element.blur());
     }
+  } catch (error) {
+    try {
+      const native = process.platform === 'darwin' && app
+        ? await app.evaluate(({ app, BrowserWindow, screen }) => ({
+          active: app.isActive(), focusedId: BrowserWindow.getFocusedWindow()?.id,
+          cursor: screen.getCursorScreenPoint(),
+          windows: BrowserWindow.getAllWindows().map(window => ({
+            id: window.id, visible: window.isVisible(), focused: window.isFocused(),
+            minimized: window.isMinimized(), content: window.getContentBounds(),
+          })),
+        })) : undefined;
+      console.error(JSON.stringify({ downloadControlFailure: {
+        scale: process.env.VOXCUE_TEST_SCALE_FACTOR ?? '1', native,
+        renderer: await probe.evaluate(probe => probe.read()),
+      } }));
+    } catch (diagnostic) { console.error('Download control diagnostic unavailable:', diagnostic.message); }
+    throw error;
   } finally {
+    await probe.evaluate(probe => probe.dispose());
+    await probe.dispose();
     await page.evaluate((dark) => document.documentElement.classList.toggle('dark', dark), dark);
     await pointAtControl(app, button, false);
   }

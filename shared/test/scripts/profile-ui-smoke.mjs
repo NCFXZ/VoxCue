@@ -408,17 +408,56 @@ try {
   await page.getByRole('button', { name: '新对话', exact: true }).click();
   await page.locator('.preparation-guide').getByText('接下来想做什么？', { exact: true }).waitFor();
   await verifySkillPromptLayout(page, '生成技能');
-  await page
-    .locator('.preparation-guide')
-    .getByRole('button', { name: '查看个人资料', exact: true })
-    .click();
-  assert((await saved()).background.includes('简历摘要'));
-  checks.push(
-    'attachment summaries preview/consent, storage failure recovery and home-only skill guidance',
-  );
-  await message.fill('尚未发送的草稿');
-  if (!(await panel.isVisible())) await info.click();
-  await expand('简历摘要');
+  const panelProbe = await page.evaluateHandle(() => {
+    const panel = document.querySelector('#personal-info-panel');
+    const toggle = document.querySelector('button[aria-controls="personal-info-panel"]');
+    const events = [];
+    const note = stage => {
+      events.push({ stage, at: performance.now(), open: panel.dataset.open,
+        hidden: panel.getAttribute('aria-hidden'), expanded: toggle.getAttribute('aria-expanded') });
+      if (events.length > 20) events.shift();
+    };
+    const click = event => {
+      const button = event.target instanceof Element ? event.target.closest('button') : null;
+      if (button === toggle) note('topbar-click');
+      else if (button?.closest('.preparation-guide') && button.textContent.trim() === '查看个人资料') note('guide-profile-click');
+    };
+    window.addEventListener('click', click, true);
+    const observer = new MutationObserver(() => note('panel-state'));
+    observer.observe(panel, { attributes: true, attributeFilter: ['data-open', 'aria-hidden'] });
+    return {
+      read() {
+        const style = getComputedStyle(panel);
+        return { events, viewport: [innerWidth, innerHeight], dpr: devicePixelRatio,
+          open: panel.dataset.open, hidden: panel.getAttribute('aria-hidden'), inert: panel.inert,
+          expanded: toggle.getAttribute('aria-expanded'), rect: panel.getBoundingClientRect().toJSON(),
+          visibility: style.visibility, opacity: style.opacity, width: style.width,
+          focused: document.hasFocus() };
+      },
+      dispose() { observer.disconnect(); window.removeEventListener('click', click, true); },
+    };
+  });
+  try {
+    await page
+      .locator('.preparation-guide')
+      .getByRole('button', { name: '查看个人资料', exact: true })
+      .click();
+    await panel.waitFor({ state: 'visible' });
+    await settleDisclosure(panel);
+    assert.equal(await info.getAttribute('aria-expanded'), 'true');
+    assert((await saved()).background.includes('简历摘要'));
+    checks.push(
+      'attachment summaries preview/consent, storage failure recovery and home-only skill guidance',
+    );
+    await message.fill('尚未发送的草稿');
+    await expand('简历摘要');
+  } catch (error) {
+    console.error(JSON.stringify({ profilePanelFailure: await panelProbe.evaluate(probe => probe.read()) }));
+    throw error;
+  } finally {
+    try { await panelProbe.evaluate(probe => probe.dispose()); }
+    finally { await panelProbe.dispose(); }
+  }
   const resumeSection = section('简历摘要');
   await resumeSection.getByRole('button', { name: '编辑', exact: true }).click();
   const resumeEditor = page.getByRole('dialog', { name: '编辑简历摘要', exact: true });

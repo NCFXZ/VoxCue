@@ -2,11 +2,11 @@
 
 ## 当前发行任务
 
-- Windows 目标版本为 1.3.6，Microsoft Store 为 2.3.6.0。按用户指定的 [五条更新日志](shared/docs/1.3.6_UPDATE.md)执行清理、全面测试、修复重测、验包以及 GitHub `NCFXZ/VoxCue`、CNB 和微软商店发布。
-- Windows 1.3.6 已发布到 GitHub 与 CNB，正式源码标签 `v1.3.6` 指向 `6246268`；EXE、blockmap 和签名清单沿用相同原始文件，CNB 公开索引已更新，临时镜像流水线已移除。本轮已停止的临时测试／发布资源已清理。Store 2.3.6.0 已上传并提交认证，当前为 Submission 14 的预处理阶段。Mac 按完整源码移植范围接续本机验收与发行。
-- 保留 Claude 与 Codex 的联合修改及验证边界。功能、安全、对抗、英文、UI／DPI、原生、稳定性和安装升级分层验收；GUI／原生在已解锁控制台串行，独立非 GUI 检查可并行。
-- RAG 仅用本轮新建合成资料检查完整功能，不更改现有模型、阈值或检索参数，不使用既有准确率数据集。保护现用缓存、依赖、签名身份及升级恢复基线，历史明确跳过的目录不重试清理。
-- 所有本次功能和测试修复都需逐条写入 macOS 1.3.5 → 1.3.6 交接；Windows 上 `macos/` 保持只读，原生等效实现与本机验收列入交接。
+- macOS 1.3.6 的本机回归与最终签名包安装／升级验收已完成，当前待把原始 DMG、ZIP、增量计划和清单附加到 GitHub `NCFXZ/VoxCue` 与 CNB 的现有 `v1.3.6`，最后更新 CNB `main/releases.json`。源码直接使用 `main` 并以 `macos-v1.3.6` 标记；保留 Windows 的 `v1.3.6` 标签和资产，更新说明沿用 GitHub 原文。
+- Mac 原生密钥字段在主题、字体、位置和布局就绪后显示；补齐真实弹窗、崩溃清理、Google 光学／实际缩放检查与失败诊断，以及资料面板、账号状态异步等待的测试同步。真实 1.3.5 升级基线已登记，区分保留分库 revision 与更早布局重建，并覆盖旧版签名缓存 offer。详细实现与入口见 [Mac 交接](shared/docs/MACOS_1.3.6_HANDOFF.md)。
+- 已核对消费者并清理 Finder 元数据与无引用构建副本。现用依赖、认证公共缓存、签名材料及发行恢复基线保留，历史明确暂留目录不重试。临时合成资料和已停止 VM 待发布收尾统一清理；任务结束前保持屏幕与系统唤醒，不改锁屏策略。
+- RAG 仅使用本轮新建合成资料验证完整功能，模型、阈值及检索参数保持。真实 Kimi／Gemini 服务组合未使用实际账户密钥验收，物理音频不采样；交付明确这些覆盖边界。
+- Windows 1.3.6 已发布到 GitHub 与 CNB，正式源码标签 `v1.3.6` 指向 `6246268`；Store 2.3.6.0 已上传并提交认证，当前为 Submission 14 的预处理阶段。本机 `windows/` 全树只读，Mac 不提交 Microsoft Store。
 
 ## 1.3.6 实现摘要
 
@@ -39,7 +39,7 @@
 ## 发行状态与接续待办
 
 - Windows 1.3.6 的 EXE、blockmap 和 Ed25519 签名清单已发布；CNB 公开索引包含 Windows 1.3.6，并保留两端的 1.3.5 和 1.3.3。现用本地组件仍为 `models-v1.0.0`。 [GitHub 1.3.6](https://github.com/NCFXZ/VoxCue/releases/tag/v1.3.6) · [CNB 1.3.6](https://cnb.cool/voxcue-release/voxcue-release/-/releases/tag/v1.3.6)
-- Mac 1.3.5 的签名 DMG、ZIP、增量计划和清单，以及 Windows 1.3.5 的 EXE、blockmap、签名清单与 Store 包继续保留为升级恢复基线。Mac 1.3.6 尚待按完整交接在本机实现、验收及双源发行。
+- Mac 1.3.5 的签名 DMG、ZIP、增量计划和清单，以及 Windows 1.3.5 的 EXE、blockmap、签名清单与 Store 包继续保留为升级恢复基线。Mac 1.3.6 已同步本平台配置与原生密钥显示顺序，正在本机全面验收，随后完成最终包安装／升级及双源发行。
 - [GitHub 1.3.3](https://github.com/NCFXZ/VoxCue/releases/tag/v1.3.3)和 [CNB 1.3.3](https://cnb.cool/voxcue-release/voxcue-release/-/releases/tag/v1.3.3)保留两端正式原件作为升级基线。
 - Windows Sandbox 升级入口为 `store-sandbox-smoke.mjs --nsis-upgrade-1.3.5` 和 `--appx-upgrade-1.3.5`，保留原 1.3.3 入口及固定摘要升级基线；1.3.5 → 1.3.6 覆盖签名缓存 offer／资料与 RAG 持久化，现有分库索引保留 `ragRevision`。
 - Microsoft Store 2.3.6.0 已提交认证，Submission 14 为 `1152921505702524260`；2026-11-27 观察状态为 `In certification`／`Pre-processing`，通过后自动发布，尚未上架。中英文五条更新日志与新增 API 服务说明已同步，原有各六张截图保留。上一版 Submission 13 的 2.3.5.0 已在商店上线。

@@ -9,6 +9,7 @@ import { offlineElectronEntry } from './offline-electron-entry.mjs';
 import { closeUiApp } from './install-ui-account.mjs';
 import { captureRequested } from './capture-requested.mjs';
 import { assertPasswordVisibility, assertPasswordClearedOnClose } from './assert-password-visibility.mjs';
+import { waitForAsync } from './wait-for-async.mjs';
 import workspace from '../../scripts/workspace.mjs';
 import { Store, Auth, Services, loadConfig, createApi, routes } from './server-reference.mjs';
 const dir = path.join(testRoot, 'account-erasure');
@@ -498,14 +499,12 @@ try {
   await uiClick(confirm);
   await modal.getByRole('alert').filter({ hasText: '邮箱或密码不正确。' }).waitFor();
   assert.ok(store.user(user.email));
-  const status = await main.waitForFunction(async () => {
+  const state = await waitForAsync(main, async () => {
     const result = await window.desktop.cloudAccount({ action: 'status' });
     if (!result.ok && result.retryAfterSeconds === 1 &&
         result.error === '账号操作正在进行，请稍后重试。') return false;
     return result;
-  }, undefined, { polling: 100 });
-  const state = await status.jsonValue();
-  await status.dispose();
+  }, undefined, { timeout: 30000 });
   assert.equal(state.ok, true, state.error);
   assert.equal(state.state.user.id, user.id);
   await fs.mkdir(path.join(profile, 'component-cache'), { recursive: true });

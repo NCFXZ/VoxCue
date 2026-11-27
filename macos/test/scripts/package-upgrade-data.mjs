@@ -25,7 +25,7 @@ import os from 'node:os';
 import assert from 'node:assert/strict';
 
 const targetVersion = workspace.platformRequire('./package.json').version;
-const usesCurrentProfile = (version) => ['1.3.1', '1.3.2', '1.3.3', targetVersion].includes(version);
+const usesCurrentProfile = (version) => ['1.3.1', '1.3.2', '1.3.3', '1.3.5', targetVersion].includes(version);
 const run = (command, args) => {
   const result = spawnSync(command, args, { encoding: 'utf8', timeout: 120000 });
   if (result.error || result.status !== 0)
@@ -298,6 +298,21 @@ export async function verifyPreviousVersionData({
     VOXCUE_ACCOUNT_API: '',
   };
   let app;
+  let offerCheckedAt;
+  async function checkCachedOffer(page, version) {
+    if (offerCheckedAt === undefined) return;
+    await waitForAsync(page, async () => {
+      const state = await window.desktop.updates({ op: 'status' });
+      return !['checking', 'downloading'].includes(state.phase);
+    }, undefined, { timeout: 15000 });
+    const state = await page.evaluate(() => window.desktop.updates({ op: 'status' }));
+    assert.deepEqual({ currentVersion: state.currentVersion, autoDownload: state.autoDownload,
+      phase: state.phase, availableVersion: state.availableVersion, lastCheckedAt: state.lastCheckedAt,
+      error: state.error }, { currentVersion: version, autoDownload: false,
+      phase: version === fromVersion ? 'available' : 'idle',
+      availableVersion: version === fromVersion ? targetVersion : null,
+      lastCheckedAt: offerCheckedAt, error: null });
+  }
   const launch = async (version) => {
     verifyLocalApp(bundle, signing, 'com.voxcue.app');
     const restored = version !== '1.1.1' && !!await lstat(path.join(profile, 'synthetic-primary.json')).catch(error => {
@@ -334,6 +349,7 @@ export async function verifyPreviousVersionData({
     await rename(profile, path.join(directory, `before-normal-start-${version}`));
     await rename(normalProfile, profile);
     const reopened = await launch(version);
+    await checkCachedOffer(reopened, version);
     assert.deepEqual(await snapshot(reopened, version), before);
     for (const doc of before.documents) assert.equal(await checkIndex(reopened, doc, version), revisions[doc.id]);
     if (fromVersion === '1.2.3' && version === targetVersion) await exerciseUpgradedShortcuts(app, reopened);
@@ -464,6 +480,40 @@ export async function verifyPreviousVersionData({
     assert.equal(Object.keys(before.bindings).length, currentProfile ? 10 : 9);
     const oldOriginal = before.documents[0];
     const oldRevision = await checkIndex(old, oldOriginal, fromVersion);
+    if (fromVersion === '1.3.5') {
+      const state = await old.evaluate(() => window.desktop.updates({ op: 'set-auto-download', enabled: false }));
+      assert.equal(state.autoDownload, false);
+      await waitForAsync(old, async () => !['checking', 'downloading'].includes(
+        (await window.desktop.updates({ op: 'status' })).phase), undefined, { timeout: 15000 });
+      const manifestFile = path.join(path.dirname(zip), 'latest-mac.yml');
+      const manifestInfo = await lstat(manifestFile);
+      assert.ok(manifestInfo.isFile() && !manifestInfo.isSymbolicLink() && manifestInfo.size <= 128 * 1024);
+      assert.equal(await realpath(manifestFile), manifestFile);
+      const metadata = JSON.parse(await readFile(manifestFile, 'utf8'));
+      assert.equal(metadata.version, targetVersion);
+      offerCheckedAt = await app.evaluate(async ({ app }, { metadata, binary }) => {
+        const path = process.getBuiltinModule('path');
+        const load = process.getBuiltinModule('module').createRequire(app.getAppPath() + '/package.json');
+        const { UpdateCache, platformUpdateInfo, validatePlatformUpdate } =
+          load('./dist-electron/shared/electron/backend/updates/cache.js');
+        const { signedMacUpdate } = load('./dist-electron/macos/electron/updates/manifest.js');
+        const key = load(path.join(process.resourcesPath, 'voxcue-update.json')).publicKey;
+        const normalize = (value, target) => {
+          const info = validatePlatformUpdate(value, target);
+          const selected = signedMacUpdate(value, info.selectedRelease, key);
+          const raw = value.files.find(file => file.url === selected.url);
+          return { ...info, files: [{ ...selected, voxcueSignature: raw.voxcueSignature }] };
+        };
+        const candidate = { version: metadata.version, manifest: 'latest-mac.yml',
+          tag: 'v' + metadata.version, publishedAt: Date.now(), binary };
+        const info = platformUpdateInfo(candidate, metadata);
+        const selected = normalize({ ...info, files: metadata.files }, 'macos-arm64');
+        const cache = new UpdateCache(path.join(app.getPath('userData'), 'updates'), 'macos-arm64', normalize);
+        await cache.latest(true, async () => selected);
+        return cache.lastCheckedAt();
+      }, { metadata, binary: { name: path.basename(zip), size: update.size } });
+      assert.ok(Number.isSafeInteger(offerCheckedAt));
+    }
     await closeUiApp(app);
     app = undefined;
     if (currentProfile)
@@ -478,12 +528,16 @@ export async function verifyPreviousVersionData({
     }
     await replaceOwnedBundle(bundle, zip);
     let current = await launch(targetVersion);
+    await checkCachedOffer(current, targetVersion);
     const migrated = currentProfile
       ? before
       : { ...before, bindings: { ...before.bindings, 'toggle-shortcut-help': 'Control+Shift+/' } };
     const migratedRevision = await checkIndex(current, oldOriginal, targetVersion);
-    // The pinned upgrade baselines all predate per-library index storage.
-    assert.notEqual(migratedRevision, oldRevision, 'The shared index must be rebuilt from its retained original');
+    if (fromVersion === '1.3.5') {
+      assert.equal(migratedRevision, oldRevision, 'The existing per-library index must retain its revision');
+    } else {
+      assert.notEqual(migratedRevision, oldRevision, 'The shared index must be rebuilt from its retained original');
+    }
     await current.getByRole('button', { name: '面试记录', exact: true }).click();
     await current.getByText(record.title, { exact: true }).waitFor();
     assert.deepEqual(await snapshot(current), migrated);

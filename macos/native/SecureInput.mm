@@ -91,13 +91,17 @@ static void send(napi_threadsafe_function callback, NSString *value) {
     field.frame = old.frame;
     field.font = old.font ?: [NSFont systemFontOfSize:14];
     field.appearance = old.appearance;
-    field.hidden = !old || old.hidden;
+    BOOL hidden = !old || old.hidden;
+    field.hidden = YES;
     [self.owner addSubview:field positioned:NSWindowAbove relativeTo:nil];
     if (editor) [old abortEditing];
     old.stringValue = @"";
     old.delegate = nil;
     [old removeFromSuperview];
     self.field = field;
+    [field layoutSubtreeIfNeeded];
+    field.hidden = hidden;
+    if (!hidden) [field displayIfNeeded];
     if (selection.location != NSNotFound && !field.hidden && self.owner.window.isKeyWindow) {
         [self.owner.window makeFirstResponder:field];
         [(NSTextView *)field.currentEditor setSelectedRange:NSIntersectionRange(selection, NSMakeRange(0, text.length))];
@@ -169,9 +173,12 @@ static napi_value layout(napi_env env, napi_callback_info info) {
     field.appearance = [NSAppearance appearanceNamed:dark ? NSAppearanceNameDarkAqua : NSAppearanceNameAqua];
     NSRect content = owner.bounds;
     NSRect slot = NSMakeRect(NSMinX(content)+v[0], owner.isFlipped ? NSMinY(content)+v[1] : NSMaxY(content)-v[1]-v[3], v[2], v[3]);
-    field.hidden = !NSContainsRect(NSInsetRect(content, -0.5, -0.5), slot) || NSIsEmptyRect(slot);
+    BOOL hidden = !NSContainsRect(NSInsetRect(content, -0.5, -0.5), slot) || NSIsEmptyRect(slot);
     CGFloat lineHeight = MIN(NSHeight(slot), ceil(field.intrinsicContentSize.height));
     field.frame = NSMakeRect(NSMinX(slot), floor(NSMidY(slot)-lineHeight/2), NSWidth(slot), lineHeight);
+    [field layoutSubtreeIfNeeded];
+    field.hidden = hidden;
+    if (!hidden) [field displayIfNeeded];
     return nullptr;
 }
 static napi_value command(napi_env env, napi_callback_info info) {

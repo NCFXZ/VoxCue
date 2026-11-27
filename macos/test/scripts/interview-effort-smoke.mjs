@@ -178,12 +178,22 @@ try {
   assert.notEqual(combinedTrigger.background, 'rgba(0, 0, 0, 0)');
   assert.ok(Math.abs(combinedTrigger.labelGap - 6) < 1 / 32, JSON.stringify(combinedTrigger));
   const modelPopup = await openModelMenu(main, '面试回答模型', '面试回答思考强度');
-  async function checkRefresh(menu, newModel) {
+  async function checkRefresh(page, menu, newModel) {
     const option = menu.getByRole('menuitemradio', { name: newModel, exact: true });
     assert.equal(await option.count(), 0);
     await app.evaluate((_, id) => { globalThis.nextCatalogModel = id; }, newModel);
     await menu.getByRole('menuitem', { name: '刷新模型列表', exact: true }).click();
     await option.waitFor();
+    const options = menu.getByRole('menuitemradio');
+    await options.first().hover();
+    assert.equal(await options.first().getAttribute('data-highlighted'), '');
+    await options.first().press('ArrowDown');
+    const nextOption = await options.nth(1).elementHandle();
+    try {
+      // Radix schedules roving focus after keyboard dispatch has returned.
+      await page.waitForFunction(option => option === document.activeElement, nextOption);
+    } finally { await nextOption.dispose(); }
+    assert.ok(await options.nth(1).evaluate(option => option === document.activeElement));
     const alignment = await menu.evaluate(async (popup) => {
       await Promise.all(
         popup.getAnimations({ subtree: true }).map((animation) => animation.finished.catch(() => {})),
@@ -210,7 +220,7 @@ try {
       `${newModel}: model and refresh capsules must have the same left and right edges ${JSON.stringify(alignment)}`,
     );
   }
-  await checkRefresh(modelPopup, 'pre-interview-new-model');
+  await checkRefresh(main, modelPopup, 'pre-interview-new-model');
   await modelPopup.locator('.reasoning-model-list').evaluate((node) => {
     node.scrollTop = node.scrollHeight;
   });
@@ -267,7 +277,7 @@ try {
     .getByText('Test Model', { exact: true })
     .waitFor();
   const chatPopup = await openModelMenu(main);
-  await checkRefresh(chatPopup, 'preparation-new-model');
+  await checkRefresh(main, chatPopup, 'preparation-new-model');
   assert.equal(await chatPopup.getAttribute('data-side'), 'top');
   await chatPopup.getByRole('menuitemradio', { name: 'Test Model', exact: true }).click();
   const chatEffort = main.getByRole('slider', { name: '思考强度', exact: true });
@@ -410,7 +420,7 @@ try {
   const activeEffort = activeSettings.getByRole('button', { name: '面试回答模型', exact: true });
   await assertControlRows(activeSettings);
   const liveMenu = await openModelMenu(floating, '面试回答模型', '面试思考强度');
-  await checkRefresh(liveMenu, 'live-interview-new-model');
+  await checkRefresh(floating, liveMenu, 'live-interview-new-model');
   await floating.keyboard.press('Escape');
   await activeEffort.click();
   const activeSlider = activeSettings.getByRole('slider', { name: '面试思考强度', exact: true });

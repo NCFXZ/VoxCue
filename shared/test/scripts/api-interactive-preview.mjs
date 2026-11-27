@@ -133,7 +133,7 @@ await writeFile(
 );
 const env = Object.fromEntries(
   Object.entries(process.env).filter(([name]) =>
-    /^(?:systemroot|windir|comspec|path|pathext|temp|tmp|tmpdir|userprofile|home|appdata|localappdata|lang|lc_all|display|wayland_display|xdg_runtime_dir|sessionname)$/i.test(
+    /^(?:systemroot|windir|comspec|path|pathext|temp|tmp|tmpdir|userprofile|home|appdata|localappdata|lang|lc_all|display|wayland_display|xdg_runtime_dir|sessionname|voxcue_test_scale_factor)$/i.test(
       name,
     ),
   ),
@@ -169,6 +169,11 @@ async function runPreview() {
   ownerStage('account:enter-main');
   const login = await app.firstWindow();
   let page = login.url().endsWith('#login') ? await enterPrimaryUiAccount(app, login) : login;
+  if (env.VOXCUE_TEST_SCALE_FACTOR) {
+    const scale = await page.evaluate(() => window.devicePixelRatio);
+    assert.equal(scale, Number(env.VOXCUE_TEST_SCALE_FACTOR), 'API visual fixture uses the requested desktop scale');
+    console.log('API visual device scale:', scale);
+  }
   ownerStage('account:main-ready');
   page.setDefaultTimeout(15000);
   await page.addStyleTag({ content: `
@@ -691,6 +696,7 @@ async function runPreview() {
     assert.ok(original.includes(apiPreview.googleSearch.html), 'Original Google snippet is retained');
     await answer.getByRole('button', { name: apiPreview.googleSearch.source.title + ' · example.org', exact: true }).waitFor();
     await page.emulateMedia({ colorScheme: null });
+    const optical = [];
     for (const theme of ['深色', '浅色']) {
       await openSettings();
       await settings.getByRole('navigation', { name: '设置分类' }).getByRole('button', { name: '通用', exact: true }).click();
@@ -700,16 +706,21 @@ async function runPreview() {
       await settings.waitFor({ state: 'hidden' });
       await widget.evaluate(async frame => {
         const group = frame.closest('.chat-source-group');
-        for (const width of [280, 560]) {
-          group.style.width = width + 'px';
-          await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-          const body = frame.contentDocument.body;
-          if (group.scrollWidth > group.clientWidth + 1 || body.scrollWidth > frame.clientWidth + 1 ||
-              body.getBoundingClientRect().height > frame.clientHeight + 1 ||
-              frame.contentDocument.documentElement.scrollHeight > frame.contentDocument.documentElement.clientHeight)
-            throw Error('Google suggestions must fit without clipping');
+        const style = group.getAttribute('style');
+        try {
+          for (const width of [280, 560]) {
+            group.style.width = width + 'px';
+            await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+            const body = frame.contentDocument.body;
+            if (group.scrollWidth > group.clientWidth + 1 || body.scrollWidth > frame.clientWidth + 1 ||
+                body.getBoundingClientRect().height > frame.clientHeight + 1 ||
+                frame.contentDocument.documentElement.scrollHeight > frame.contentDocument.documentElement.clientHeight)
+              throw Error('Google suggestions must fit without clipping');
+          }
+        } finally {
+          if (style === null) group.removeAttribute('style');
+          else group.setAttribute('style', style);
         }
-        group.style.width = '';
       });
       const content = widget.contentFrame();
       assert.deepEqual(await content.locator('.container').evaluate(node => {
@@ -720,6 +731,131 @@ async function runPreview() {
       assert.ok(await content.locator(theme === '深色' ? '.logo-dark' : '.logo-light').isVisible(), 'Google branding follows the application theme');
       assert.equal(await content.locator('.chip').evaluate(node => getComputedStyle(node).color),
         theme === '深色' ? 'rgb(255, 255, 255)' : 'rgb(94, 94, 94)', 'Google suggestions follow the application theme');
+      const layoutFixture = await widget.evaluateHandle(frame => {
+        const group = frame.closest('.chat-source-group');
+        const doc = frame.contentDocument, body = doc.body;
+        const carousel = body.querySelector('.carousel');
+        const chip = carousel.querySelector('.chip');
+        const groupStyle = group.getAttribute('style'), carouselStyle = carousel.getAttribute('style');
+        let second;
+        const settled = async () => {
+          const deadline = performance.now() + 2000;
+          do {
+            await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+            const height = Math.max(1, Math.ceil(body.getBoundingClientRect().height), body.scrollHeight);
+            if (frame.clientHeight === height) return;
+          } while (performance.now() < deadline);
+          throw Error('Google suggestion iframe did not settle to its content height');
+        };
+        const rect = node => {
+          const { left, top, width, height } = node.getBoundingClientRect();
+          return { left, top, width, height };
+        };
+        const measure = mode => {
+          const headline = body.querySelector('.headline');
+          const logos = [...headline.querySelectorAll('svg')].filter(svg => getComputedStyle(svg).display !== 'none');
+          if (logos.length !== 1) throw Error('Exactly one official Google theme logo must be visible');
+          const paths = [...logos[0].querySelectorAll('path')];
+          const colors = paths.map(path => path.getAttribute('fill').toLowerCase()).sort();
+          if (JSON.stringify(colors) !== JSON.stringify(['#34a853', '#4285f4', '#ea4335', '#fbbc05']))
+            throw Error('The optical check requires the four original colored Google paths');
+          // Use the colored artwork's actual SVG geometry, excluding the dark
+          // logo's white circle and both viewBox/element bounding rectangles.
+          const points = paths.flatMap(path => {
+            const box = path.getBBox(), matrix = path.getScreenCTM();
+            return [[box.x, box.y], [box.x + box.width, box.y],
+              [box.x, box.y + box.height], [box.x + box.width, box.y + box.height]]
+              .map(([x, y]) => new DOMPoint(x, y).matrixTransform(matrix));
+          });
+          const left = Math.min(...points.map(point => point.x)), right = Math.max(...points.map(point => point.x));
+          const top = Math.min(...points.map(point => point.y)), bottom = Math.max(...points.map(point => point.y));
+          const plate = body.querySelector('.container');
+          const chipStyle = getComputedStyle(chip);
+          return {
+            mode, headline: rect(headline), first: rect(chip), second: second ? rect(second) : null,
+            dpr: doc.defaultView.devicePixelRatio,
+            chipBox: Object.fromEntries(['lineHeight', 'paddingTop', 'paddingBottom', 'borderTopWidth', 'borderBottomWidth']
+              .map(property => [property, Number.parseFloat(chipStyle[property])])),
+            colored: { left, top, width: right - left, height: bottom - top,
+              centerX: (left + right) / 2, centerY: (top + bottom) / 2 },
+            backgrounds: [doc.documentElement, body, plate].map(node => getComputedStyle(node).backgroundColor),
+            shadow: getComputedStyle(plate).boxShadow,
+            height: body.getBoundingClientRect().height, frameHeight: frame.clientHeight,
+            clipped: body.scrollWidth > frame.clientWidth + 1 || doc.documentElement.scrollHeight > doc.documentElement.clientHeight,
+          };
+        };
+        return {
+          async read(mode) {
+            group.style.width = '560px';
+            if (mode === 'two') {
+              // Explicit two-row test layout only. Keep the original official
+              // chip, SVGs and CSS; never ship a production wrap rule.
+              second = chip.cloneNode(true);
+              carousel.append(second);
+              Object.assign(carousel.style, { display: 'flex', flexDirection: 'column', alignItems: 'flex-start',
+                rowGap: '4px', overflow: 'visible', whiteSpace: 'normal' });
+            }
+            await settled();
+            return measure(mode);
+          },
+          async restore() {
+            second?.remove();
+            if (carouselStyle === null) carousel.removeAttribute('style');
+            else carousel.setAttribute('style', carouselStyle);
+            if (groupStyle === null) group.removeAttribute('style');
+            else group.setAttribute('style', groupStyle);
+            await settled();
+          },
+        };
+      });
+      const layouts = [];
+      try {
+        for (const mode of ['single', 'two']) {
+          const layout = await layoutFixture.evaluate((fixture, mode) => fixture.read(mode), mode);
+          layouts.push(layout);
+          const exact = value => Math.abs(value) <= 1 / 64;
+          // Chromium snaps the authored 1 CSS px border down to whole device
+          // pixels (with a one-device-pixel minimum), independently of box height.
+          const border = Math.max(1, Math.floor(layout.dpr)) / layout.dpr;
+          const chipHeight = 20 + 5 + 5 + 2 * border;
+          const actualOpticalOffset = layout.colored.centerY - layout.first.top - layout.first.height / 2;
+          const quantizedCenterOffset = (32 - chipHeight) / 2;
+          const opticalResidual = actualOpticalOffset - quantizedCenterOffset;
+          const context = theme + ' ' + layout.mode + ': ' + JSON.stringify({ ...layout,
+            expectedBorder: border, expectedChipHeight: chipHeight,
+            actualOpticalOffset, quantizedCenterOffset, opticalResidual });
+          assert.ok(exact(layout.chipBox.lineHeight - 20) && exact(layout.chipBox.paddingTop - 5) &&
+            exact(layout.chipBox.paddingBottom - 5), context);
+          assert.ok(exact(layout.chipBox.borderTopWidth - border) && exact(layout.chipBox.borderBottomWidth - border), context);
+          assert.ok(exact(layout.headline.width - 28) && exact(layout.headline.height - 28), context);
+          assert.ok(exact(layout.first.height - chipHeight) && exact(layout.headline.top - layout.first.top - 2), context);
+          // The official paths have small unequal viewBox margins. An eighth of
+          // one CSS pixel admits that intrinsic optical offset; compensate only
+          // the independently verified border quantization of the chip center.
+          assert.ok(Math.abs(opticalResidual) <= 1 / 8, context);
+          assert.ok(layout.colored.width > 17 && layout.colored.height > 17, context);
+          assert.deepEqual(layout.backgrounds, ['rgba(0, 0, 0, 0)', 'rgba(0, 0, 0, 0)', 'rgba(0, 0, 0, 0)'], context);
+          assert.equal(layout.shadow, 'none', context);
+          assert.equal(layout.clipped, false, context);
+          assert.equal(layout.frameHeight, Math.ceil(layout.height), context);
+          if (layout.second) {
+            assert.ok(exact(layout.second.left - layout.first.left) && exact(layout.second.top - layout.first.top - chipHeight - 4), context);
+            assert.ok(exact(layout.height - (2 * chipHeight + 4)), context);
+          } else assert.ok(exact(layout.height - chipHeight), context);
+          await captureRequested(answer,
+            `VoxCue-1.3.6-google-${theme === '深色' ? 'dark' : 'light'}-${layout.mode}`);
+        }
+        assert.ok(Math.abs(layouts[0].colored.centerX - layouts[1].colored.centerX) <= 1 / 64,
+          theme + ': wrapping must preserve the colored G horizontal center');
+        optical.push(layouts);
+      } finally {
+        try { await layoutFixture.evaluate(fixture => fixture.restore()); }
+        finally { await layoutFixture.dispose(); }
+      }
+    }
+    for (let mode = 0; mode < 2; mode++) {
+      assert.ok(Math.abs(optical[0][mode].colored.centerX - optical[1][mode].colored.centerX) <= 1 / 8,
+        'Light and dark colored G centers must optically align in ' + optical[0][mode].mode + ' layout');
     }
     await widget.contentFrame().getByRole('link', { name: apiPreview.googleSearch.label, exact: true }).click();
     assert.equal(await app.evaluate(() => globalThis.previewGoogleLink), apiPreview.googleSearch.link);

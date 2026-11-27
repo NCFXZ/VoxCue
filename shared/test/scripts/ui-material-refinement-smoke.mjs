@@ -43,8 +43,10 @@ const hoverOnly = async (page, button) => {
   await page.bringToFront();
   await focusUiWindow(app, page);
   await page.waitForFunction(() => !document.hidden && document.hasFocus());
+  let nativeOwnerId;
   if (process.platform === 'darwin') {
     const id = await (await app.browserWindow(page)).evaluate((window) => window.id);
+    nativeOwnerId = id;
     const native = await app.evaluate(({ app, BrowserWindow }, id) => ({
       active: app.isActive(),
       focused: BrowserWindow.getFocusedWindow()?.id === id,
@@ -64,27 +66,35 @@ const hoverOnly = async (page, button) => {
   await settle(page);
   const before = await button.boundingBox();
   const pointer = await page.evaluateHandle(() => {
-    const events = [];
+    const events = [], commands = [], start = performance.now();
     const record = (event) => {
       events.push({
         type: event.type,
+        at: performance.now() - start,
         trusted: event.isTrusted,
         x: event.clientX,
         y: event.clientY,
         target: event.target?.outerHTML?.slice(0, 160),
       });
-      if (events.length > 8) events.shift();
+      if (events.length > 24) events.shift();
     };
     const types = ['pointermove', 'pointerover', 'pointerout'];
     for (const type of types) window.addEventListener(type, record, true);
     return {
       events,
+      commands,
+      command: (stage, point) => {
+        commands.push({ stage, at: performance.now() - start, ...point });
+        if (commands.length > 8) commands.shift();
+      },
       stop: () => {
         for (const type of types) window.removeEventListener(type, record, true);
       },
     };
   });
   try {
+    await pointer.evaluate((pointer, point) => pointer.command('locator.hover', point),
+      { x: before.x + before.width / 2, y: before.y + before.height / 2 });
     await button.hover();
     await settle(page);
     // Auto-scroll and the completed response can move a proposal after hover's
@@ -95,7 +105,11 @@ const hoverOnly = async (page, button) => {
       return { x, y, hitsButton: node.contains(document.elementFromPoint(x, y)) };
     });
     assert.equal(target.hitsButton, true, 'The settled center must hit the hover control');
+    await pointer.evaluate((pointer, point) => pointer.command('mouse.move', point),
+      { x: target.x - 1, y: target.y, steps: 2 });
     await page.mouse.move(target.x - 1, target.y, { steps: 2 });
+    await pointer.evaluate((pointer, point) => pointer.command('mouse.move', point),
+      { x: target.x, y: target.y, steps: 2 });
     await page.mouse.move(target.x, target.y, { steps: 2 });
     await page.waitForFunction((node) => node.matches(':hover'), await button.elementHandle());
     await settle(page);
@@ -119,10 +133,17 @@ const hoverOnly = async (page, button) => {
         };
       })
       .catch((error) => ({ error: error.message }));
-    const events = await pointer.evaluate((pointer) => pointer.events).catch(() => []);
+    const input = await pointer.evaluate(({ events, commands }) => ({ events, commands })).catch(() => ({}));
+    const native = process.platform === 'darwin'
+      ? await app.evaluate(({ app, BrowserWindow, screen }, id) => {
+        const owner = BrowserWindow.fromId(id);
+        return { expectedId: id, active: app.isActive(), focusedId: BrowserWindow.getFocusedWindow()?.id,
+          cursor: screen.getCursorScreenPoint(), visible: owner?.isVisible(), focused: owner?.isFocused(),
+          content: owner?.getContentBounds(), zoom: owner?.webContents.getZoomFactor() };
+      }, nativeOwnerId).catch(error => ({ error: error.message })) : undefined;
     console.error(
       'Hover input failure',
-      JSON.stringify({ scale: process.env.VOXCUE_TEST_SCALE_FACTOR, ...diagnostics, events }),
+      JSON.stringify({ scale: process.env.VOXCUE_TEST_SCALE_FACTOR, ...diagnostics, ...input, native }),
     );
     throw error;
   } finally {

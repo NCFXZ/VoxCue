@@ -1,6 +1,6 @@
 # Mac 安装与免费自动更新
 
-当前源码面向 Apple Silicon arm64、macOS 14.2及以上，使用共用网页控件、SF Symbols和原生侧栏材质，不再要求Liquid Glass。固定Codex0.164.0、Copilot SDK/平台运行时1.0.21；模型与ONNX Web不内嵌，最终用户无需另装Node/Python。首次下载DMG后将VoxCue拖入Applications。应用按本平台最高完整正式资产选择更新，不依赖统一Latest；面试期间禁止安装，重启前等待保存成功，普通退出不触发安装。当前 Mac 正式源码为 [macos-v1.2.3](https://github.com/NCFXZ/VoxCue/tree/macos-v1.2.3)，已发行 1.1.1／1.2.2 用于升级兼容；未发布 Mac 中间版本不作为恢复或测试入口。当前线上发行与任务范围见[进度](../../PROGRESS.md)，最终包门禁见 [guest 准备](TEST_GUEST.md)。
+当前源码面向 Apple Silicon arm64、macOS 14.2及以上，使用共用网页控件、SF Symbols和原生侧栏材质，不再要求Liquid Glass。运行时依赖以 `shared/package.json` 与 `macos/pnpm-lock.yaml` 为准；模型与ONNX Web不内嵌，最终用户无需另装Node/Python。首次下载DMG后将VoxCue拖入Applications。应用按本平台最高完整正式资产选择更新，不依赖统一Latest；面试期间禁止安装，重启前等待保存成功，普通退出不触发安装。Mac 1.3.6 对应源码使用 [macos-v1.3.6](https://github.com/NCFXZ/VoxCue/tree/macos-v1.3.6)，保留已有 Windows `v1.3.6` 标签；固定旧版升级基线见 [guest 准备](TEST_GUEST.md)，未发布 Mac 中间版本不作为恢复或测试入口。当前线上发行与任务范围见[进度](../../PROGRESS.md)。
 
 采用 [Sparkle](https://sparkle-project.org/documentation/) 2.10.0 的免费 Ed25519 更新签名。已发布至0.3.1的应用使用ad-hoc代码签名；2026-10-19起的源码打包流程改为复用固定本地自签名证书；0.5.5 再增加独立固定签名凭据助手，保留其代码哈希，修复仅固定应用证书仍反复要求钥匙串授权的问题。首次导入历史密码仍可能需要一次系统授权，详见[凭据与版本升级](CREDENTIALS.md)。未购买Developer ID，也未经过Apple公证。首次打开时macOS仍可能阻止运行，需用户在“系统设置 → 隐私与安全性”明确允许该应用；更新不会替用户关闭系统安全检查或移除隔离属性。现有发行资产没有自动重建。
 
@@ -85,4 +85,4 @@ corepack pnpm test:package
 
 共享 `test:updates` 覆盖界面、IPC、面试限制与保存握手，其外部更新器是夹具，不能单独作为原生安装证明。独立合成原生更新专项使用临时密钥和旧／新测试应用，不使用真实资料或发行私钥；`CFFIXED_USER_HOME` 不能保证 Sparkle／Launch Services／cfprefsd 的全部偏好都写入临时目录，严格隔离任务应放在可丢弃 guest 内执行。
 
-`test:package` 统一通过 [guest runner](TEST_GUEST.md) 验证最终 ZIP 的固定公钥、Ed25519、签名元数据和 SHA512，以及 DMG 内同一签名应用、布局、资源和凭据助手原字节。认证的公开组件只读复制到来宾临时 profile，再断网复用。实际正式产品正常启动／退出、独立开发宿主内的最终 ASAR 检查、1.1.1／1.2.2 资料覆盖升级与 Sparkle 认证各有不同证明范围，按该入口执行，不能改写旧包或最终产品开启调试。`--online` 产品探针已退役；发布后使用无产品启动的匿名资产与清单回读。
+`test:package` 统一通过 [guest runner](TEST_GUEST.md) 验证最终 ZIP 的固定公钥、Ed25519、签名元数据和 SHA512，以及 DMG 内同一签名应用、布局、资源和凭据助手原字节。认证的公开组件只读复制到来宾临时 profile，再断网复用。实际正式产品正常启动／退出、独立开发宿主内的最终 ASAR 检查、所选固定旧版的资料覆盖升级与 Sparkle 认证各有不同证明范围，按该入口执行，不能改写旧包或最终产品开启调试。`--online` 产品探针已退役；发布后使用无产品启动的匿名资产与清单回读。
