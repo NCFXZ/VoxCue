@@ -3,7 +3,7 @@
 ## 当前发行任务
 
 - Windows 目标版本为 1.3.6，Microsoft Store 为 2.3.6.0。按用户指定的 [五条更新日志](shared/docs/1.3.6_UPDATE.md)执行清理、全面测试、修复重测、验包以及 GitHub `NCFXZ/VoxCue`、CNB 和微软商店发布。
-- Windows 1.3.6 已发布到 GitHub 与 CNB，正式源码标签 `v1.3.6` 指向 `6246268`；EXE、blockmap 和签名清单沿用相同原始文件，CNB 公开索引已更新，临时镜像流水线已移除。本轮已停止的临时测试／发布资源已清理。Store 2.3.6.0 包已准备，待 Partner Center 恢复后上传并提交。Mac 按完整源码移植范围接续本机验收与发行。
+- Windows 1.3.6 已发布到 GitHub 与 CNB，正式源码标签 `v1.3.6` 指向 `6246268`；EXE、blockmap 和签名清单沿用相同原始文件，CNB 公开索引已更新，临时镜像流水线已移除。本轮已停止的临时测试／发布资源已清理。Store 2.3.6.0 已上传并提交认证，当前为 Submission 14 的预处理阶段。Mac 按完整源码移植范围接续本机验收与发行。
 - 保留 Claude 与 Codex 的联合修改及验证边界。功能、安全、对抗、英文、UI／DPI、原生、稳定性和安装升级分层验收；GUI／原生在已解锁控制台串行，独立非 GUI 检查可并行。
 - RAG 仅用本轮新建合成资料检查完整功能，不更改现有模型、阈值或检索参数，不使用既有准确率数据集。保护现用缓存、依赖、签名身份及升级恢复基线，历史明确跳过的目录不重试清理。
 - 所有本次功能和测试修复都需逐条写入 macOS 1.3.5 → 1.3.6 交接；Windows 上 `macos/` 保持只读，原生等效实现与本机验收列入交接。
@@ -21,7 +21,7 @@
 
 ## 1.3.5 升级与恢复基线
 
-**2026-11-24 · macOS 和 Windows 1.3.5 已在 GitHub 与 CNB 正式发行。** 版本唯一来源为 `shared/package.json`，平台配置分别由本机同步。Microsoft Store 2.3.5.0 已提交认证。
+**2026-11-24 · macOS 和 Windows 1.3.5 已在 GitHub 与 CNB 正式发行。** 版本唯一来源为 `shared/package.json`，平台配置分别由本机同步。
 
 - 侧栏、聊天记录、知识库卡片和文档、待发送附件及两个面试输入框采用非线性动画。跨行补位时在行边缘淡出和淡入。知识库详情平滑调整高度，到达上限后文档区滚动，关闭时原地淡出。
 - 知识库按库使用独立索引目录和写进程。后台删除可跨重启恢复。由旧共享布局升级时先清理旧生成索引，再从保留的原件按库重建，沿用现有索引进度。现有分库索引继续使用。
@@ -42,6 +42,6 @@
 - Mac 1.3.5 的签名 DMG、ZIP、增量计划和清单，以及 Windows 1.3.5 的 EXE、blockmap、签名清单与 Store 包继续保留为升级恢复基线。Mac 1.3.6 尚待按完整交接在本机实现、验收及双源发行。
 - [GitHub 1.3.3](https://github.com/NCFXZ/VoxCue/releases/tag/v1.3.3)和 [CNB 1.3.3](https://cnb.cool/voxcue-release/voxcue-release/-/releases/tag/v1.3.3)保留两端正式原件作为升级基线。
 - Windows Sandbox 升级入口为 `store-sandbox-smoke.mjs --nsis-upgrade-1.3.5` 和 `--appx-upgrade-1.3.5`，保留原 1.3.3 入口及固定摘要升级基线；1.3.5 → 1.3.6 覆盖签名缓存 offer／资料与 RAG 持久化，现有分库索引保留 `ragRevision`。
-- Microsoft Store 2.3.6.0 包待上传与提交；Partner Center 的 VoxCue 应用概览／提交概览持续加载失败，需恢复页面后接续。已有中英文商品页及各六张截图保留；不能依据历史 Submission 13 状态推断当前认证或上架状态。
+- Microsoft Store 2.3.6.0 已提交认证，Submission 14 为 `1152921505702524260`；2026-11-27 观察状态为 `In certification`／`Pre-processing`，通过后自动发布，尚未上架。中英文五条更新日志与新增 API 服务说明已同步，原有各六张截图保留。上一版 Submission 13 的 2.3.5.0 已在商店上线。
 - [官网欢迎公告配置](shared/docs/ANNOUNCEMENTS.md)待在另一台电脑的 EdgeOne Pages 项目 `voxcue-website` 发布并核对 `/app/announcements.json`。
 - 固定轻量语音模型可能误识别极短语气词。云端 0.6.1 跨设备并发新增截图引用与删除的既有竞态详见 [历史交接](shared/docs/WINDOWS_1.3.0_HANDOFF.md)。
