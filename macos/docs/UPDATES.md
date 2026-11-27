@@ -1,6 +1,6 @@
 # Mac 安装与免费自动更新
 
-当前源码面向 Apple Silicon arm64、macOS 14.2及以上，使用共用网页控件、SF Symbols和原生侧栏材质，不再要求Liquid Glass。运行时依赖以 `shared/package.json` 与 `macos/pnpm-lock.yaml` 为准；模型与ONNX Web不内嵌，最终用户无需另装Node/Python。首次下载DMG后将VoxCue拖入Applications。应用按本平台最高完整正式资产选择更新，不依赖统一Latest；面试期间禁止安装，重启前等待保存成功，普通退出不触发安装。Mac 1.3.6 对应源码使用 [macos-v1.3.6](https://github.com/NCFXZ/VoxCue/tree/macos-v1.3.6)，保留已有 Windows `v1.3.6` 标签；固定旧版升级基线见 [guest 准备](TEST_GUEST.md)，未发布 Mac 中间版本不作为恢复或测试入口。当前线上发行与任务范围见[进度](../../PROGRESS.md)。
+当前源码面向 Apple Silicon arm64、macOS 14.2及以上，使用共用网页控件、SF Symbols和原生侧栏材质，不再要求Liquid Glass。运行时依赖以 `shared/package.json` 与 `macos/pnpm-lock.yaml` 为准；模型与ONNX Web不内嵌，最终用户无需另装Node/Python。首次下载DMG后将VoxCue拖入Applications。应用按本平台最高完整正式资产选择更新，不依赖统一Latest；面试期间禁止安装，重启前等待保存成功，普通退出不触发安装。Mac 1.3.6 的本轮源码实现见 [6615878](https://github.com/NCFXZ/VoxCue/commit/66158781bb67b488d93a5e3b4c87ffb8a100e64a)，源码沿用 `main`，两平台资产共用已有 `v1.3.6` 发行；固定旧版升级基线见 [guest 准备](TEST_GUEST.md)，未发布 Mac 中间版本不作为恢复或测试入口。当前线上发行与任务范围见[进度](../../PROGRESS.md)。
 
 采用 [Sparkle](https://sparkle-project.org/documentation/) 2.10.0 的免费 Ed25519 更新签名。已发布至0.3.1的应用使用ad-hoc代码签名；2026-10-19起的源码打包流程改为复用固定本地自签名证书；0.5.5 再增加独立固定签名凭据助手，保留其代码哈希，修复仅固定应用证书仍反复要求钥匙串授权的问题。首次导入历史密码仍可能需要一次系统授权，详见[凭据与版本升级](CREDENTIALS.md)。未购买Developer ID，也未经过Apple公证。首次打开时macOS仍可能阻止运行，需用户在“系统设置 → 隐私与安全性”明确允许该应用；更新不会替用户关闭系统安全检查或移除隔离属性。现有发行资产没有自动重建。
 
